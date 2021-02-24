@@ -22,4 +22,4 @@ You need Python 3.x or later to run mypy.
 Getting Started
 -----
 
-python3 yuna_env.py
+$python3 yuna_env.py
