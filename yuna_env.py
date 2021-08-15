@@ -3,10 +3,11 @@ import pybullet_data
 import time
 import math
 import numpy as np
+from Tools.PIDController import PIDController
 from CPG.calculate_limitcycle import *
 from CPG.updateCPGStance import *
-from CPG.CPG_controller import *
-
+# from CPG.CPG_controller import *
+from CPG.kuramoto_CPG import *
 
 physicsClient = p.connect(p.GUI)#or p.DIRECT for non-graphical version
 
@@ -41,6 +42,16 @@ rest_position = np.array([0, 0, -1.57,
                      0, 0, 1.57,
                      0, 0, 1.57])
 
+# create stairs
+box11l = 0.5
+box11w = 2
+box11h = 0.1
+sh_box11 = p.createCollisionShape(p.GEOM_BOX,halfExtents=[box11l,box11w,box11h])
+sth = 0.15
+for k in range(10):
+    p.createMultiBody(baseMass=0, baseCollisionShapeIndex=sh_box11,
+                       basePosition=[0+0.4*k, 0+k/200, k*sth], baseOrientation=[0.0, 0.0, 0.0, 1])
+
 
 from setup.xMonsterKinematics import *
 xmk = HexapodKinematics()
@@ -49,6 +60,13 @@ xmk = HexapodKinematics()
 T = 5000 #Time in seconds code operates for
 nIter = int(round(T/0.01))
 pi = math.pi
+
+#      \ ____ /           x
+#       |    |            |
+#     --|    |--     y ___|
+#       |____|
+#      /      \
+
 #creating cpg dict
 cpg = {
     'initLength': 0,
@@ -85,7 +103,7 @@ cpg = {
     'xmk': xmk, #Snake Monster Kinematics object
     'pose': np.eye(3), #%SO(3) describing ground frame w.r.t world frame
     'R': SE3(np.eye(3),[0, 0, 0]), #SE(3) describing body correction in the ground frame
-    'G': np.eye(3), #SO(3) describing ground frame w.r.t world frame
+    'G': roty(0)[0:3, 0:3],  # np.eye(3),  # ##SO(3) describing ground frame w.r.t world frame
     'tp': np.zeros([4,1]),
     'dynY': 0,
     'vY': 0,
@@ -98,6 +116,8 @@ cpg = {
 cx = np.array([-1/6, -1/6, 0, 0, 0, 0]) * pi
 cy = np.array([0, 0, 0, 0, 0, 0]) * pi
 
+cpg['pid'] = PIDController([3, 6], 0.2, 1, 0.015, 0.00, pi / 2 * cpg['scaling'], pi / 2 * cpg['scaling'],pi / 2 * cpg['scaling'], pi / 2 * cpg['scaling'])
+cpg['T'] = SE3(np.eye(3), np.array([+0.20, 0, cpg['h']]))  # SE(3) describing desired body orientation in the ground frame
 
 cpg['eePos'] = np.vstack((cpg['nomX'],cpg['nomY'], -cpg['h'] * np.ones([1,6]) )) # R: Compute the EE positions in body frame
 ang = cpg['xmk'].getLegIK(cpg['eePos']) #R: This gives the angles corresponding to each of the joints
@@ -125,6 +145,12 @@ cpg['K'] = np.array( [[0, -1, -1,  1,  1, -1],
                      [ 1, -1, -1,  1,  0, -1],
                      [-1,  1,  1, -1, -1,  0]])
 
+cpg['phi'] = [[0, np.pi, np.pi, 0, 0, np.pi],
+              [np.pi, 0, 0, np.pi, np.pi, 0],
+              [np.pi, 0, 0, np.pi, np.pi, 0],
+              [0, np.pi, np.pi, 0, 0, np.pi],
+              [0, np.pi, np.pi, 0, 0, np.pi],
+              [np.pi, 0, 0, np.pi, np.pi, 0]]
 # Initialize the x and y values of the cpg cycle
 cpg['x'][0, :] = (a * np.array([1, -1, -1, 1, 1, -1]) + cx) * cpg['scaling']
 cpg['y'][0, :] = np.zeros(6)
@@ -134,13 +160,24 @@ frame = 0
 while 1:
     p.stepSimulation()
 
+    # get the yuna's pose feedback
+    YunaPos, YunaOrn = p.getBasePositionAndOrientation(Yuna)
+    pose = p.getMatrixFromQuaternion(YunaOrn)
+    euler = p.getEulerFromQuaternion(YunaOrn)  # roll, pitch, yaw
+    # print('euler',euler)
+    pose = np.asarray(pose)
+    pose_matrix = np.reshape(pose, (3, 3))
+
+    # SEpose = SE3(pose_matrix ,YunaPos)
+    cpg['pose'] = pose_matrix
+
 
     cpg = updateCPGStance(cpg, cpg['t'])
     cpg, positions = CPG(cpg, cpg['t'], dt)
 
     cpg['t'] += 1
 
-    if cpg['t'] > (cpg['initLength'] + 300):
+    if cpg['t'] > (cpg['initLength'] + 100):
         cpg['move'] = True
         cpg_position = cpg['legs'][0, :]
         # leg.num correction due to urdf file
@@ -154,8 +191,8 @@ while 1:
     else:
         commanded_position = rest_position
 
-    print(commanded_position)
-    forces = [40.] * len(actuators)
+    # print(commanded_position)
+    forces = [60.] * len(actuators)
     p.setJointMotorControlArray(Yuna, actuators, controlMode=p.POSITION_CONTROL, targetPositions=commanded_position,
                                 positionGains=[0.5]*len(actuators),velocityGains=[1]*len(actuators),forces=forces)
 

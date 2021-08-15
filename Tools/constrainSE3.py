@@ -14,7 +14,7 @@ def constrainSE3(cpg, t, dt):
 # AB: expresses frame A w.r.t frame B
     np.set_printoptions(precision=5)
     r = np.vstack((cpg['xmk'].getLegPositions(cpg['legs']), np.ones([1,6])))
-    cpg['G'] = np.identity(3)
+    # cpg['G'] = np.identity(3)
 
     #Set SE3 tranforms
     GW = SE3(cpg['G'], np.zeros([3]))

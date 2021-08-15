@@ -18,13 +18,18 @@ def CPG(cpg, t, dt):
     shoulders2 = range(1, 18, 3)  # joint IDs of the second shoulder joints
     elbows = range(2, 3, 18)  # joint IDs of the elbow joints
 
-    # dynOffsetError = copy.deepcopy(np.zeros([3, 6]))
+    dynOffsetError = copy.deepcopy(np.zeros([3, 6]))
 
-    # if t > cpg['initLength']:
-    #     [dynOffsetError, cpg] = computeOffsets(cpg, t, dt)
+    if t > cpg['initLength']:
+        [dynOffsetError, cpg] = computeOffsets(cpg, t, dt)
 
     # Scale
-    # dynOffsetError = dynOffsetError * cpg['scaling']*0
+    dynOffsetError = dynOffsetError * cpg['scaling']
+
+    y0 = cpg['dynOffset'][1, :]
+
+    cpg['cy'] = y0
+    # print('cy', cpg['cy'])
 
     # CPG Implmentation/Equations
     gamma_x = 40  # forcing to limit cycle (larger = stronger)
@@ -55,18 +60,26 @@ def CPG(cpg, t, dt):
         for value in range(6):
             truth = (cpg['CPGStanceDelta'].flatten())[value]
         truther = False
-
+        cpg['updStab'] = np.logical_or(cpg['CPGStance'], (dy < 0))
 
     else:
         dx = 0
         dy = 0
         truther = True
         dx_const = 0
-        updStab = np.logical_or(cpg['CPGStance'], np.array([False, False, False, False, False, False]))
+        cpg['updStab'] = np.logical_or(cpg['CPGStance'], np.array([False, False, False, False, False, False]))
+
+    # Calculate dynOffsetInc
+    # print('CPGStance',cpg['CPGStance'])
+    # print('upStab', cpg['updStab'])
+    cpg['pid'].update(dt, dynOffsetError, cpg['updStab'][0])
+    cpg['dynOffset'] = cpg['pid'].getCO()
+    cpg['dynOffsetInc'] = cpg['pid'].getDeltaCO()
 
     # Integrate dx & dy to produce joint commands
-    cpg['x'][t + 1, :] = cpg['x'][t, :] + dx * dt  # + cpg['dynOffsetInc'][0,:]
-    cpg['y'][t + 1, :] = cpg['y'][t, :] + dy * dt  # + cpg['dynOffsetInc'][1,:]
+    cpg['x'][t + 1, :] = cpg['x'][t, :] + dx * dt + cpg['dynOffsetInc'][0, :]
+    cpg['y'][t + 1, :] = cpg['y'][t, :] + dy * dt + cpg['dynOffsetInc'][1, :]
+    print('dynOffsetInc',cpg['dynOffsetInc'][1, :])
 
     # Command CPG-generated values to joints
     yOut = cpg['y'][t + 1, :]
@@ -83,7 +96,7 @@ def CPG(cpg, t, dt):
             xOut[:, value] = SignRight * SignBack * cpg['x'][t + 1, value]
 
     cpg['legs'][0,0:18:3] = limitValue((cpg['nomOffset'][0,:] + cpg['shouldersCorr'] * xOut), pi/2 * cpg['scaling'])
-    cpg['legs'][0,1:19:3] =cpg['shouldersCorr'] * np.maximum(0, yOut) + cpg['nomOffset'][1,:]
+    cpg['legs'][0,1:19:3] =cpg['shouldersCorr'] * np.maximum(y0, yOut) + cpg['nomOffset'][1,:]
 
     # JOINT 3 - FOR WALKING TRIALS
     cpg['legs'][0, 0:18:3] = cpg['legs'][0, 0:18:3] / cpg['scaling']
@@ -100,10 +113,8 @@ def CPG(cpg, t, dt):
         if truth:
             indicies.append(index)
 
-
     Leglength = 0.325
     z = np.array([-math.pi / 2, math.pi / 2, -math.pi / 2, math.pi / 2, -math.pi / 2, math.pi / 2])
-
 
     if cpg['t'] > (cpg['initLength'] + 100) and cpg['direction'] == 'forward':
 
@@ -113,7 +124,6 @@ def CPG(cpg, t, dt):
             cpg['legs'][0, 2 + index * 3] = angs[2 + index * 3]  # +(cpg['dynOffset'][2,index]/cpg['scaling'])
 
     cpg['legs'] = np.reshape(cpg['legs'][0:18], [1, 18])
-
 
     if cpg['t'] > (cpg['initLength'] + 100):
         positions = cpg['xmk'].getLegPositions(cpg['legs'])
