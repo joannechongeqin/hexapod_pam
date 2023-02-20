@@ -1,227 +1,132 @@
 import pybullet as p
 import pybullet_data
+import os
 import time
-import math
-import numpy as np
-from Tools.PIDController import PIDController
-from CPG.calculate_limitcycle import *
-from CPG.updateCPGStance import *
-# from CPG.CPG_controller import *
-from CPG.kuramoto_CPG import *
+import robot_setup
+from robot_setup.yunaKinematics import *
 
-physicsClient = p.connect(p.GUI)#or p.DIRECT for non-graphical version
+class YunaEnv:
+    def __init__(self, visualiser=True, camerafollow=True, real_robot_control=True):
+        self.real_robot_control = real_robot_control
+        self.visualiser = visualiser
+        self.camerafollow = camerafollow
+        self.dt = 1 /240
+        self.xmk, self.imu, self.hexapod, self.fbk_imu, self.fbk_hp, self.group_command, self.group_feedback = self.robot_connect()
+        self._load_env()
+        self._init_robot()
 
-# set visualization
-p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 0)
-p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
+    def step(self, targetPositions, iteration=1, sleep='auto'):
+        jointspace_command2bullet, jointspace_command2hebi = self._solveIK(targetPositions)
+        for i in range(iteration):
+            t_start = time.perf_counter()
+            p.setJointMotorControlArray(
+                bodyIndex=self.YunaID, 
+                jointIndices=self.actuator, 
+                controlMode=p.POSITION_CONTROL, 
+                targetPositions=jointspace_command2bullet)
 
-# load world
+            if self.real_robot_control:
+                self.group_command.position = jointspace_command2hebi
+                self.hexapod.send_command(self.group_command)
+                self.group_feedback = self.hexapod.get_next_feedback(reuse_fbk=self.group_feedback)
 
-p.setAdditionalSearchPath(pybullet_data.getDataPath()) #used by loadURDF (plane)
-planeId = p.loadURDF("plane.urdf")
-p.setGravity(0,0,-10)
+            p.stepSimulation()
+            self._cam_follow()
+            t_stop = time.perf_counter()
+            t_step = t_stop - t_start
+            if sleep == 'auto':
+                time.sleep(max(0, self.dt - t_step))
+            else:
+                time.sleep(sleep)
 
-# load robot model
+    def close(self):
+        try:
+            p.disconnect()
+        except p.error as e:
+            print('Termination of simulation failed:', e)
 
-YunaStartPos = [0,0,0.5]
-YunaStartOrientation = p.getQuaternionFromEuler([0,0,0])
-Yuna = p.loadURDF("urdf/yuna.urdf",YunaStartPos, YunaStartOrientation)
+    def robot_connect(self):
+        if self.real_robot_control:
+            xmk, imu, hexapod, fbk_imu, fbk_hp = robot_setup.setup_xmonster()
+            group_command = hebi.GroupCommand(hexapod.size)
+            group_feedback = hebi.GroupFeedback(hexapod.size)
+            hexapod.feedback_frequency = 100.0
+            hexapod.command_lifetime = 0
+            while True:
+                group_feedback = hexapod.get_next_feedback(reuse_fbk=group_feedback)
+                if type(group_feedback) != None:
+                    break
+            return xmk, imu, hexapod, fbk_imu, fbk_hp, group_command, group_feedback
+        else:
+            return HexapodKinematics(), False, False, False, False, False, False
 
-p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1)
-# p.saveWorld("yuna_quickworld")
+    def _load_env(self):
+        #initialise interface
+        if self.visualiser:
+            self.physicsClient = p.connect(p.GUI)
+            p.setRealTimeSimulation(1)
+            p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 0)
+            p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
+        else:
+            self.physicsClient = p.connect(p.DIRECT)
+        #physical parameters
+        self.gravity = -9.81
+        self.friction = 0.7
+        #load ground
+        p.setAdditionalSearchPath(pybullet_data.getDataPath())
+        self.groundID = p.loadURDF('plane.urdf')
+        p.setGravity(0, 0, self.gravity)
+        p.changeDynamics(self.groundID, -1, lateralFriction=self.friction)
+        #load Yuna robot
+        Yuna_init_pos = [0,0,0.5]
+        Yuna_init_orn = p.getQuaternionFromEuler([0,0,0])
+        Yuna_file_path = os.path.abspath(os.path.dirname(__file__)) + '/urdf/yuna.urdf'
+        self.YunaID = p.loadURDF(Yuna_file_path, Yuna_init_pos, Yuna_init_orn)
+        self.joint_num = p.getNumJoints(self.YunaID)
+        self.actuator = [i for i in range(self.joint_num) if p.getJointInfo(self.YunaID,i)[2] != p.JOINT_FIXED]
+        
+        if self.visualiser:
+            self._add_reference_line()
+            self._cam_follow()
+            p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1)
+            
+    def _init_robot(self):
+        # parameters
+        self.h = 0.2249# body height
+        self.eePos = np.array( [[0.51589,    0.51589,   0.0575,     0.0575,     -0.45839,   -0.45839],
+                                [0.23145,   -0.23145,   0.5125,     -0.5125,    0.33105,    -0.33105],
+                                [-self.h,   -self.h,    -self.h,    -self.h,    -self.h,    -self.h]])# neutral position for the robot
+        init_pos = self.eePos
+        self.step(init_pos, iteration=65, sleep='auto')
 
-joint_num = p.getNumJoints(Yuna)
-actuators = [i for i in range(joint_num) if p.getJointInfo(Yuna,i)[2] != p.JOINT_FIXED]
+    def _solveIK(self, workspace_command):
+        jointspace_command2hebi = self.xmk.getLegIK(workspace_command)
+        jointspace_command2bullet = jointspace_command2hebi[[0,1,2,6,7,8,12,13,14,3,4,5,9,10,11,15,16,17,]].copy()# reshaped the IK result: 123456->135246
+        return jointspace_command2bullet, jointspace_command2hebi
+  
+    def _cam_follow(self):
+        cam_pos, cam_orn = self._get_pose()
+        if not self.camerafollow:
+            cam_pos = [0, 0, 0.5]
+        p.resetDebugVisualizerCamera(cameraDistance=2, cameraYaw=np.rad2deg(cam_orn[2])-90, cameraPitch=-35, cameraTargetPosition=cam_pos)
 
-# p.setRealTimeSimulation(1)
-legs = [0.] * len(actuators)
-rest_position = np.array([0, 0, -1.57,
-                     0, 0, -1.57,
-                     0, 0, -1.57,
-                     0, 0, 1.57,
-                     0, 0, 1.57,
-                     0, 0, 1.57])
+    def _get_pose(self):
+        pos, orn = p.getBasePositionAndOrientation(self.YunaID)
+        return pos, p.getEulerFromQuaternion(orn)
 
-# create stairs
-box11l = 0.5
-box11w = 2
-box11h = 0.1
-sh_box11 = p.createCollisionShape(p.GEOM_BOX,halfExtents=[box11l,box11w,box11h])
-sth = 0.15
-for k in range(10):
-    p.createMultiBody(baseMass=0, baseCollisionShapeIndex=sh_box11,
-                       basePosition=[0+0.4*k, 0+k/200, k*sth], baseOrientation=[0.0, 0.0, 0.0, 1])
-
-
-from setup.xMonsterKinematics import *
-xmk = HexapodKinematics()
-
-# CPG
-T = 5000 #Time in seconds code operates for
-nIter = int(round(T/0.01))
-pi = math.pi
-
-#      \ ____ /           x
-#       |    |            |
-#     --|    |--     y ___|
-#       |____|
-#      /      \
-
-#creating cpg dict
-cpg = {
-    'initLength': 0,
-    's': 0.15 * np.ones(6),   # stride length
-    'nomX': np.array([0.51589,  0.51589,  0.0575,   0.0575, - 0.45839, - 0.45839]),
-    'nomY': np.array([0.23145, - 0.23145,   0.5125, - 0.5125,   0.33105, - 0.33105]),
-    'h': 0.2249,
-    's1OffsetY': np.array([0.2375*math.sin(pi/6), -0.2375*math.sin(pi/6), 0.1875, -0.1875, 0.2375*math.sin(pi/6), -0.2375*math.sin(pi/6)]),#robot measurement;  distance on y axis from robot center to base_actuator
-    's1OffsetAngY': np.array([-pi/3, pi/3, 0, 0, pi/3, -pi/3]),
-    'n': 2,  #limit cycle shape 2:standard, 4:super
-    'b': np.array([0.6, 0.6, 0.6, 0.6, 0.6, 0.6]), #np.array([.4, .4, .4, .4, .4, .4]), #TUNEABLE: step height in radians %1.0
-    'scaling': 10, #TUNEABLE: shifts the units into a reasonable range for cpg processing (to avoid numerical issues)
-    'shouldersCorr': np.array([-1, 1, -1, 1, -1, 1]),
-    'phase_lags': np.array([pi, pi, 0, pi, 0, pi]),
-    'dynOffset': np.zeros([3,6]), #Offset on joints developed through constraining
-    'dynOffsetInc': np.zeros([3,6]), #Increment since last iteration
-    'x': np.zeros([nIter,6]), #TUNEABLE: Initial CPG x-positions
-    'y': np.zeros([nIter,6]), #TUNEABLE: Initial CPG y-positions
-    'x0': np.zeros([1,6]), #limit cycle center x
-    'y0': np.zeros([6,6]), #limit cycle center y
-    'legs': np.zeros([1,18]), #Joint angle values
-    'elbowsLast': np.zeros([1,6]), #elbow values
-    'torques': np.zeros([1,18]), #Joint torque values
-    'torqueOffsets': np.zeros([1,18]), #Joint torque offset values
-    'gravCompTorques': np.zeros([1,18]), #Joint torque values
-    'forces': np.zeros([3,6]), #ee force values
-    'gravCompForces': np.zeros([3,6]), #Joint torque values
-    'forceStance': np.zeros([1,6]), #grounded legs determined by force
-    'CPGStance': np.array([False,False,False,False,False,False]), #grounded legs determined by position (lower tripod)
-    'CPGStanceDelta': np.zeros([1,6]), #grounded legs determined by position (lower tripod)
-    'CPGStanceBiased': np.zeros([1,6]), #grounded legs determined by position (lower tripod)
-    'comm_alpha': 1.0, #commanded alpha in the complementary filter (1-this) is the measured joint angles
-    'move': True, #true: walks according to cpg.direction, false: stands in place (will continue to stabilize); leave to true for CPG convergence
-    'xmk': xmk, #Snake Monster Kinematics object
-    'pose': np.eye(3), #%SO(3) describing ground frame w.r.t world frame
-    'R': SE3(np.eye(3),[0, 0, 0]), #SE(3) describing body correction in the ground frame
-    'G': roty(0)[0:3, 0:3],  # np.eye(3),  # ##SO(3) describing ground frame w.r.t world frame
-    'tp': np.zeros([4,1]),
-    'dynY': 0,
-    'vY': 0,
-    'direction' : 'forward',
-    'fullStepLength' : 20000,
-    't' : 0
-}
-
-
-cx = np.array([-1/6, -1/6, 0, 0, 0, 0]) * pi
-cy = np.array([0, 0, 0, 0, 0, 0]) * pi
-
-cpg['pid'] = PIDController([3, 6], 0.2, 1, 0.015, 0.00, pi / 2 * cpg['scaling'], pi / 2 * cpg['scaling'],pi / 2 * cpg['scaling'], pi / 2 * cpg['scaling'])
-cpg['T'] = SE3(np.eye(3), np.array([+0.20, 0, cpg['h']]))  # SE(3) describing desired body orientation in the ground frame
-
-cpg['eePos'] = np.vstack((cpg['nomX'],cpg['nomY'], -cpg['h'] * np.ones([1,6]) )) # R: Compute the EE positions in body frame
-ang = cpg['xmk'].getLegIK(cpg['eePos']) #R: This gives the angles corresponding to each of the joints
-cpg['nomOffset'] = np.reshape(ang[0:18], [6, 3]).T
-cpg['nomOffset'] = cpg['nomOffset'] * cpg['scaling']
-
-# the distance between foot ground trajectory (TUNEABLE)
-cpg['foothold_offsetY'] = np.array([0.33145, - 0.33145,   0.5125, - 0.5125,   0.33105, - 0.33105])
-
-# the distance between foot ground trajectory to base actuator
-dist = cpg['foothold_offsetY'] - cpg['s1OffsetY']
-
-# calculate the a respective to cx to make stride length of 6 legs to be equal
-a = calculate_a(cpg, cx, dist)
-
-cpg['a'] = a * cpg['scaling']
-cpg['b'] = cpg['b'] * cpg['scaling']
-cpg['cx'] = cx * cpg['scaling']
-cpg['cy'] = cy * cpg['scaling']
-
-cpg['K'] = np.array( [[0, -1, -1,  1,  1, -1],
-                     [-1,  0,  1, -1, -1,  1],
-                     [-1,  1,  0, -1, -1,  1],
-                     [ 1, -1, -1,  0,  1, -1],
-                     [ 1, -1, -1,  1,  0, -1],
-                     [-1,  1,  1, -1, -1,  0]])
-
-cpg['phi'] = [[0, np.pi, np.pi, 0, 0, np.pi],
-              [np.pi, 0, 0, np.pi, np.pi, 0],
-              [np.pi, 0, 0, np.pi, np.pi, 0],
-              [0, np.pi, np.pi, 0, 0, np.pi],
-              [0, np.pi, np.pi, 0, 0, np.pi],
-              [np.pi, 0, 0, np.pi, np.pi, 0]]
-# Initialize the x and y values of the cpg cycle
-cpg['x'][0, :] = (a * np.array([1, -1, -1, 1, 1, -1]) + cx) * cpg['scaling']
-cpg['y'][0, :] = np.zeros(6)
-dt = 0.01  # CPG frequency
-
-frame = 0
-while 1:
-    p.stepSimulation()
-
-    # get the yuna's pose feedback
-    YunaPos, YunaOrn = p.getBasePositionAndOrientation(Yuna)
-    pose = p.getMatrixFromQuaternion(YunaOrn)
-    euler = p.getEulerFromQuaternion(YunaOrn)  # roll, pitch, yaw
-    # print('euler',euler)
-    pose = np.asarray(pose)
-    pose_matrix = np.reshape(pose, (3, 3))
-
-    # SEpose = SE3(pose_matrix ,YunaPos)
-    cpg['pose'] = pose_matrix
+    def _add_reference_line(self):
+        p.addUserDebugLine(lineFromXYZ=[-100,-100,0], lineToXYZ=[100,100,0], lineColorRGB=[0.5,0,0], lineWidth=10)
+        p.addUserDebugLine(lineFromXYZ=[-100,100,0], lineToXYZ=[100,-100,0], lineColorRGB=[0.5,0,0], lineWidth=10)
+        p.addUserDebugLine(lineFromXYZ=[-100,-173.2,0], lineToXYZ=[100,173.2,0], lineColorRGB=[0,0,0.5], lineWidth=10)
+        p.addUserDebugLine(lineFromXYZ=[-100,173.2,0], lineToXYZ=[100,-173.2,0], lineColorRGB=[0,0,0.5], lineWidth=10)
+        p.addUserDebugLine(lineFromXYZ=[-173.2,-100,0], lineToXYZ=[173.2,100,0], lineColorRGB=[0,0,0.5], lineWidth=10)
+        p.addUserDebugLine(lineFromXYZ=[-173.2,100,0], lineToXYZ=[173.2,-100,0], lineColorRGB=[0,0,0.5], lineWidth=10)
+        p.addUserDebugLine(lineFromXYZ=[-100,0,0], lineToXYZ=[100,0,0], lineColorRGB=[0,0,0], lineWidth=10)
+        p.addUserDebugLine(lineFromXYZ=[0,-100,0], lineToXYZ=[0,100,0], lineColorRGB=[0,0,0], lineWidth=10)
 
 
-    cpg = updateCPGStance(cpg, cpg['t'])
-    cpg, positions = CPG(cpg, cpg['t'], dt)
-
-    cpg['t'] += 1
-
-    if cpg['t'] > (cpg['initLength'] + 100):
-        cpg['move'] = True
-        cpg_position = cpg['legs'][0, :]
-        # leg.num correction due to urdf file
-        commanded_position[0:3] = cpg_position[0:3]     # 1 to 1
-        commanded_position[3:6] = cpg_position[6:9]     # 2 to 3
-        commanded_position[6:9] = cpg_position[12:15]   # 3 to 5
-        commanded_position[9:12] = cpg_position[3:6]    # 4 to 2
-        commanded_position[12:15] = cpg_position[9:12]   # 5 to 4
-        commanded_position[15:18] = cpg_position[15:18]   # 6 to 6
-
-    else:
-        commanded_position = rest_position
-
-    # print(commanded_position)
-    forces = [60.] * len(actuators)
-    p.setJointMotorControlArray(Yuna, actuators, controlMode=p.POSITION_CONTROL, targetPositions=commanded_position,
-                                positionGains=[0.5]*len(actuators),velocityGains=[1]*len(actuators),forces=forces)
-
-
-    # time.sleep(0.01)
-    time.sleep(1. / 240.)
-    distance = 2
-    yaw = 40
-    YunaPos, YunaOrn = p.getBasePositionAndOrientation(Yuna)
-    # p.resetDebugVisualizerCamera(distance, yaw, -20, YunaPos)
-    frame += 1
-# YunaPos, YunaOrn = p.getBasePositionAndOrientation(Yuna)
-# print(YunaPos,YunaOrn)
-# time.sleep(10)
-p.disconnect()
-
-"""
-# get motors list
-joint_num = p.getNumJoints(Yuna)
-print("joint_number:",joint_num)
-actuators = []
-for j in range(joint_num):
-    info = p.getJointInfo(Yuna,j)
-    if info[2] == p.JOINT_REVOLUTE:
-        actuators.append(j)
-        print(info[1])
-print(actuators)   # [12, 13, 14, 17, 18, 19, 22, 23, 24, 27, 28, 29, 32, 33, 34, 37, 38, 39]   in  1,3,5,2,4,6 order
-"""
-
-
-
-
+if __name__=='__main__':
+    #test code
+    yunaenv = YunaEnv()
+    time.sleep(20)
+    yunaenv.close()
