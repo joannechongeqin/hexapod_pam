@@ -1,6 +1,3 @@
-'''
-Run this file to test different motions of Yuna and observe how it transit between motions
-'''
 from Yuna import Yuna
 import time
 

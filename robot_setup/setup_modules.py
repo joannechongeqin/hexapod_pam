@@ -4,6 +4,7 @@
 import numpy as np
 import hebi
 from time import sleep
+import os
 
 
 # import rospkg
@@ -31,7 +32,7 @@ def setup_modules():
     # Set the Gains (Multiple Times)
 
     gains_command = hebi.GroupCommand(hexapod.size)
-    gains_command.read_gains('/Users/junkai/Projects/PSA Hexapod Control/Hexapod-Joystick/robot_setup/setupFiles/gains18.xml')
+    gains_command.read_gains(os.path.abspath(os.path.dirname(__file__)) + '/setupFiles/gains18.xml')
     for i in range(3):
         hexapod.send_command(gains_command)
         sleep(0.1)

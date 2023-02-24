@@ -1,6 +1,7 @@
 import numpy as np
 from robot_setup.yunaKinematics import HexapodKinematics
 import hebi
+from functions import solveIK, rot
 
 class TrajPlanner:
     def __init__(self):
@@ -13,40 +14,60 @@ class TrajPlanner:
         self.clearance = 0.1 # maximum foot clearance when the robot lifts its leg
         self.xmk = HexapodKinematics()
 
-    def general_traj(self, waypoints, total_time=1, time_vector=[]): 
-        # input: a series of trajectories, output: a series of more dense interpolated trajectories
-        num_pos = np.shape(waypoints)[0]#the number of given positions in a trajectory
+    def general_traj(self, waypoints, total_time=1, time_vector=[]): # input: a series of trajectories in workspace or jointspace, output: a series of more dense interpolated trajectories in jointspace
+        num_pos = len(waypoints)#the number of given positions in a trajectory
         jointspace_command = np.zeros(shape=(18,num_pos))
         for i in range(num_pos):
-            _, jointspace_command[:,i] = self._solveIK(waypoints[i]) # discard the first output which is for pybullet environment
+            if np.shape(waypoints[i]) == (3,6):# input workspace command as waypoint
+                _, jointspace_command[:,i] = solveIK(waypoints[i]) # discard the first output which is for pybullet environment
+            elif np.shape(waypoints[i]) == (18,):# input jointspace command as waypoint
+                jointspace_command[:,i] = waypoints[i]
+            else:
+                raise ValueError('Command that Yuna cannot recognise')
         if not time_vector:
             interval = total_time / (num_pos - 1)
             time_vector = [interval * _  for _ in range(num_pos)] #assuming the time is evenly distributed, otherwise please assign customised time vector in argument
         trajectory = hebi.trajectory.create_trajectory(time_vector, jointspace_command)
         duration = trajectory.duration
         len_traj = int(duration / self.dt) + 1
-        traj = np.zeros((len_traj,3,6))
+        traj = np.zeros((len_traj,18))
         for i in range(len_traj):
             pos, vel, acc = trajectory.get_state(i*self.dt)
-            traj[i] = self._solveFK(pos)
-        return traj        
+            traj[i] = pos
+        return traj   
+    '''
+    Using a cycloid curve to generate the foot trajectory, you can use plot_traj.py to visualise this curve
+    The cycloid parametric equation is:
+        x = r * (t - sin(t))
+        y = r * (1 - cos(t))
+    The height (y_max) of this cycloid is 2*r and length (x_max) is 2*pi*r
 
-    def walk_swing_traj(self, init_pos, end_pos):
-        via_pos = (init_pos + end_pos) / 2
-        via_pos[2] += self.clearance
-        t = np.ones((7, self.swing_dim))
-        tf = self.swing_dim * self.dt # finish time, usually 0.5s
-        time = np.linspace(0, tf, self.swing_dim)
-        for i in range(7):
-            t[i,:] = np.power(time, i)
-        a_0 = init_pos
-        a_1 = np.zeros(3)
-        a_2 = np.zeros(3)
-        a_3 = (2 / (tf ** 3)) * (32 * (via_pos - init_pos) - 11 * (end_pos - init_pos))
-        a_4 = -(3 / (tf ** 4)) * (64 * (via_pos - init_pos) - 27 * (end_pos - init_pos))
-        a_5 = (3 / (tf ** 5)) * (64 * (via_pos - init_pos) - 30 * (end_pos - init_pos))
-        a_6 = -(32 / (tf ** 6)) * (2 * (via_pos - init_pos) - (end_pos - init_pos))
-        traj = np.stack([a_0, a_1, a_2, a_3, a_4, a_5, a_6], axis=-1).dot(t)
+    If there is a point rigidly attached to the centre of this circle and the distance is R, the trajectory of this point is:
+        x = r * (t - R * sin(t))
+        y = r * (1 - R * cos(t))
+
+    Suppose the velocity of circle centre is v0, the angular velocity of the circle is w0, we have:
+        v0 = w0 * r
+    The points with the same x coordinates with circle centre have the velocity of:
+        v = v0 + w0 * (y - yc) = v0 - w0 * R
+    where y is the y coodinate of the point, yc is the y coordinate of the circle centre
+    If R = 0, v is the velocity of circle centre and equals to v0, 
+    if R = r, v is the velocity of the point contacting the ground, which is 0
+    Our desired v for the foot trajectory is -v0, and the corresponding R = 2
+    
+    If we want to rescale it to use as a foot trajectory, then the resized equation is:
+        x = s * (t - 2 * sin(t)) / (2 * pi)
+        y = c * (1 - 2 * cos(t) + 1) / 4
+    where s stands for stride length and c stands for foot clearance
+    '''
+    def walk_swing_traj(self, init_pos, end_pos): # ellipse trajectory
+        stride = end_pos - init_pos # a vector indicating the direction and length
+        clearance = np.array((0, 0, self.clearance)) #foot clearance
+        dt = 2 * np.pi / self.swing_dim
+        traj = np.zeros((3, self.swing_dim))
+        for i in range(self.swing_dim):
+            t = i * dt
+            traj[:, i] = init_pos + stride * (t - 2 * np.sin(t)) / (2 * np.pi) + clearance * (1 - 2 * np.cos(t) + 1) / 4
         return np.transpose(traj)
 
     def walk_support_traj(self, init_pos, end_pos):
@@ -54,52 +75,20 @@ class TrajPlanner:
         return np.transpose(traj)
 
     def turn_swing_traj(self, neutral_pos, init_ang, end_ang):
-        traj = np.zeros((self.swing_dim, 3))
-        init_pos = self._rot(neutral_pos, init_ang)
-        end_pos = self._rot(neutral_pos, end_ang)
-        via_pos = self._rot(neutral_pos, (init_ang + end_ang) / 2)
-        via_pos[2] += self.clearance
-        t = np.ones((7, self.swing_dim))
-        tf = self.swing_dim * self.dt # finish time, usually 0.5s
-        time = np.linspace(0, tf, self.swing_dim)
-        for i in range(7):
-            t[i,:] = np.power(time, i)
-        a_0 = init_pos
-        a_1 = np.zeros(3)
-        a_2 = np.zeros(3)
-        a_3 = (2 / (tf ** 3)) * (32 * (via_pos - init_pos) - 11 * (end_pos - init_pos))
-        a_4 = -(3 / (tf ** 4)) * (64 * (via_pos - init_pos) - 27 * (end_pos - init_pos))
-        a_5 = (3 / (tf ** 5)) * (64 * (via_pos - init_pos) - 30 * (end_pos - init_pos))
-        a_6 = -(32 / (tf ** 6)) * (2 * (via_pos - init_pos) - (end_pos - init_pos))
-        swing_traj = np.transpose(np.stack([a_0, a_1, a_2, a_3, a_4, a_5, a_6], axis=-1).dot(t))
-        support_traj = self.turn_support_traj(neutral_pos, init_ang, end_ang)
-        traj[:, :2], traj[:, 2] = support_traj[:,:2], swing_traj[:,2]
-        return traj
+        stride = end_ang - init_ang
+        clearance = np.array((0, 0, self.clearance))
+        dt = 2 * np.pi / self.swing_dim
+        traj = np.zeros((3, self.support_dim))
+        for i in range(self.swing_dim):
+            t = i * dt
+            ang = init_ang + stride * (t - 2 * np.sin(t)) / (2 * np.pi)
+            pos = rot(neutral_pos, ang)
+            traj[:, i] = pos + clearance * (1 - 2 * np.cos(t) + 1) / 4
+        return np.transpose(traj)
 
     def turn_support_traj(self, neutral_pos, init_ang, end_ang):
         traj = np.zeros((3, self.support_dim))
         angles = np.linspace(init_ang, end_ang, self.support_dim)
         for i in range(self.support_dim):
-            traj[:,i] = self._rot(neutral_pos, angles[i])
+            traj[:,i] = rot(neutral_pos, angles[i])
         return np.transpose(traj)
-
-    def _rot(self, pos, angle):
-        c, s = np.cos(angle), np.sin(angle)
-        rot_z = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
-        pos_ = np.matmul(rot_z, pos)
-        return pos_
-    
-    def _solveIK(self, workspace_command):
-        jointspace_command2hebi = self.xmk.getLegIK(workspace_command)
-        jointspace_command2bullet = jointspace_command2hebi[[0,1,2,6,7,8,12,13,14,3,4,5,9,10,11,15,16,17,]].copy()# reshaped the IK result: 123456->135246
-        return jointspace_command2bullet, jointspace_command2hebi
-
-    def _solveFK(self, jointspace_command2hebi):
-        workspace_command = self.xmk.getLegPositions(np.array([jointspace_command2hebi]))
-        return workspace_command
-
-
-
-
-
-

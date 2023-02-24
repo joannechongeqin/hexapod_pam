@@ -1,37 +1,49 @@
 import pybullet as p
 import pybullet_data
-import os
+import os, sys
 import time
 import robot_setup
 from robot_setup.yunaKinematics import *
+from functions import hebi2bullet, solveIK
 
 class YunaEnv:
-    def __init__(self, visualiser=True, camerafollow=True, real_robot_control=True):
+    def __init__(self, visualiser=True, camerafollow=True, real_robot_control=True, pybullet_on=True):
         self.real_robot_control = real_robot_control
         self.visualiser = visualiser
         self.camerafollow = camerafollow
         self.dt = 1 /240
         self.xmk, self.imu, self.hexapod, self.fbk_imu, self.fbk_hp, self.group_command, self.group_feedback = self.robot_connect()
-        self._load_env()
+        self.error = np.zeros((18,))
+        self.pybullet_on = pybullet_on
+        if self.pybullet_on:
+            self._load_env()
         self._init_robot()
 
     def step(self, targetPositions, iteration=1, sleep='auto'):
-        jointspace_command2bullet, jointspace_command2hebi = self._solveIK(targetPositions)
+        # judge the input target position is workspace command or jointspace command
+        if np.shape(targetPositions) == (3,6): # workspace command
+            jointspace_command2bullet, jointspace_command2hebi = solveIK(targetPositions)
+        elif np.shape(targetPositions) == (18,): # jointspace command
+            jointspace_command2bullet, jointspace_command2hebi = hebi2bullet(targetPositions), targetPositions
+        else:
+            raise ValueError('Command that Yuna cannot recognise')
         for i in range(iteration):
             t_start = time.perf_counter()
-            p.setJointMotorControlArray(
-                bodyIndex=self.YunaID, 
-                jointIndices=self.actuator, 
-                controlMode=p.POSITION_CONTROL, 
-                targetPositions=jointspace_command2bullet)
-
+            # real robot control
             if self.real_robot_control:
-                self.group_command.position = jointspace_command2hebi
+                self.group_command.position = jointspace_command2hebi - 0.3 * self.error
                 self.hexapod.send_command(self.group_command)
                 self.group_feedback = self.hexapod.get_next_feedback(reuse_fbk=self.group_feedback)
-
-            p.stepSimulation()
-            self._cam_follow()
+                self.error = self.group_feedback.position - jointspace_command2hebi
+            # pybullet control
+            if self.pybullet_on:
+                p.setJointMotorControlArray(
+                    bodyIndex=self.YunaID, 
+                    jointIndices=self.actuator, 
+                    controlMode=p.POSITION_CONTROL, 
+                    targetPositions=jointspace_command2bullet)
+                p.stepSimulation()
+                self._cam_follow()
             t_stop = time.perf_counter()
             t_step = t_stop - t_start
             if sleep == 'auto':
@@ -41,11 +53,20 @@ class YunaEnv:
 
     def close(self):
         try:
-            p.disconnect()
+            arr = np.zeros([1, 18])[0]
+            self.group_command.effort = arr
+            self.group_command.position = np.nan * arr
+            self.group_command.velocity_limit_max = arr
+            self.group_command.velocity_limit_min = arr
+            self.hexapod.send_command(self.group_command)
+            if self.pybullet_on:
+                p.disconnect()
+            sys.exit()
         except p.error as e:
             print('Termination of simulation failed:', e)
 
     def robot_connect(self):
+        # initialise connection to the real robot
         if self.real_robot_control:
             xmk, imu, hexapod, fbk_imu, fbk_hp = robot_setup.setup_xmonster()
             group_command = hebi.GroupCommand(hexapod.size)
@@ -64,7 +85,6 @@ class YunaEnv:
         #initialise interface
         if self.visualiser:
             self.physicsClient = p.connect(p.GUI)
-            p.setRealTimeSimulation(1)
             p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 0)
             p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
         else:
@@ -96,13 +116,8 @@ class YunaEnv:
         self.eePos = np.array( [[0.51589,    0.51589,   0.0575,     0.0575,     -0.45839,   -0.45839],
                                 [0.23145,   -0.23145,   0.5125,     -0.5125,    0.33105,    -0.33105],
                                 [-self.h,   -self.h,    -self.h,    -self.h,    -self.h,    -self.h]])# neutral position for the robot
-        init_pos = self.eePos
+        init_pos = self.eePos.copy()
         self.step(init_pos, iteration=65, sleep='auto')
-
-    def _solveIK(self, workspace_command):
-        jointspace_command2hebi = self.xmk.getLegIK(workspace_command)
-        jointspace_command2bullet = jointspace_command2hebi[[0,1,2,6,7,8,12,13,14,3,4,5,9,10,11,15,16,17,]].copy()# reshaped the IK result: 123456->135246
-        return jointspace_command2bullet, jointspace_command2hebi
   
     def _cam_follow(self):
         cam_pos, cam_orn = self._get_pose()
@@ -127,6 +142,6 @@ class YunaEnv:
 
 if __name__=='__main__':
     #test code
-    yunaenv = YunaEnv()
-    time.sleep(20)
+    yunaenv = YunaEnv(real_robot_control=0)
+    time.sleep(3)
     yunaenv.close()

@@ -1,6 +1,3 @@
-'''
-This file is for testing joystick function
-'''
 import sys
 import pygame
 from pygame.locals import *
