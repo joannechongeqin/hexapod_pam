@@ -3,7 +3,7 @@
 
 Run `main.py` to control the robot using a game controller  
 Run `joystick_test.py` to test the game controller and obtain button index  
-Run `Yuna.py` to watch yuna controlled by a series of commands
+Run `Yuna.py` to watch yuna controlled by a series of commands 
 Run `Yuna_TrajPlanner.py` to visualise thetrajectory of one foot
 
 ## Yuna configuration
