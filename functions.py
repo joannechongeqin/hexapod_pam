@@ -1,11 +1,11 @@
 import numpy as np
 from robot_setup.yunaKinematics import HexapodKinematics
 
-def rot(pos, angle):
+def rot(pos, angle, pivot=np.array([0,0,0])):# pivot: the centre of rotation, only (x ,y) is effective
     c, s = np.cos(angle), np.sin(angle)
     rot_z = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
-    pos_ = np.matmul(rot_z, pos)
-    return pos_
+    pos_ = np.matmul(rot_z, pos - pivot)
+    return pos_ + pivot
 
 def trans(pos, distance, angle):
     pos_ = pos.copy()

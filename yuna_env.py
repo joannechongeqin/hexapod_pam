@@ -7,7 +7,7 @@ from robot_setup.yunaKinematics import *
 from functions import hebi2bullet, solveIK
 
 class YunaEnv:
-    def __init__(self, visualiser=True, camerafollow=True, real_robot_control=True, pybullet_on=True):
+    def __init__(self, real_robot_control=True, pybullet_on=True, visualiser=True, camerafollow=True):
         self.real_robot_control = real_robot_control
         self.visualiser = visualiser
         self.camerafollow = camerafollow
@@ -26,8 +26,9 @@ class YunaEnv:
         elif np.shape(targetPositions) == (18,): # jointspace command
             jointspace_command2bullet, jointspace_command2hebi = hebi2bullet(targetPositions), targetPositions
         else:
-            raise ValueError('Command that Yuna cannot recognise')
-        for i in range(iteration):
+            raise ValueError('Command that Yuna cannot recognise, please input either workspace command whose shape(targetPositions)=(3,6), or jointspace command whose shape(targetPositions)=(18,)')
+        
+        for i in range(iteration): # iteration is usually 1, but if the given target position is not possible to reach within 1 step, more than 1 iteration could be set
             t_start = time.perf_counter()
             # real robot control
             if self.real_robot_control:
@@ -43,7 +44,8 @@ class YunaEnv:
                     controlMode=p.POSITION_CONTROL, 
                     targetPositions=jointspace_command2bullet)
                 p.stepSimulation()
-                self._cam_follow()
+                if self.camerafollow:
+                    self._cam_follow()
             t_stop = time.perf_counter()
             t_step = t_stop - t_start
             if sleep == 'auto':
@@ -52,18 +54,19 @@ class YunaEnv:
                 time.sleep(sleep)
 
     def close(self):
-        try:
-            arr = np.zeros([1, 18])[0]
-            self.group_command.effort = arr
-            self.group_command.position = np.nan * arr
-            self.group_command.velocity_limit_max = arr
-            self.group_command.velocity_limit_min = arr
-            self.hexapod.send_command(self.group_command)
-            if self.pybullet_on:
+        if self.real_robot_control:
+                arr = np.zeros([1, 18])[0]
+                self.group_command.effort = arr
+                self.group_command.position = np.nan * arr
+                self.group_command.velocity_limit_max = arr
+                self.group_command.velocity_limit_min = arr
+                self.hexapod.send_command(self.group_command)
+        if self.pybullet_on:
+            try:
                 p.disconnect()
-            sys.exit()
-        except p.error as e:
-            print('Termination of simulation failed:', e)
+            except p.error as e:
+                print('Termination of simulation failed:', e)
+        sys.exit()
 
     def robot_connect(self):
         # initialise connection to the real robot
@@ -82,22 +85,22 @@ class YunaEnv:
             return HexapodKinematics(), False, False, False, False, False, False
 
     def _load_env(self):
-        #initialise interface
+        # initialise interface
         if self.visualiser:
             self.physicsClient = p.connect(p.GUI)
             p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 0)
             p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
         else:
             self.physicsClient = p.connect(p.DIRECT)
-        #physical parameters
+        # physical parameters
         self.gravity = -9.81
         self.friction = 0.7
-        #load ground
+        # load ground
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         self.groundID = p.loadURDF('plane.urdf')
         p.setGravity(0, 0, self.gravity)
         p.changeDynamics(self.groundID, -1, lateralFriction=self.friction)
-        #load Yuna robot
+        # load Yuna robot
         Yuna_init_pos = [0,0,0.5]
         Yuna_init_orn = p.getQuaternionFromEuler([0,0,0])
         Yuna_file_path = os.path.abspath(os.path.dirname(__file__)) + '/urdf/yuna.urdf'
@@ -112,7 +115,7 @@ class YunaEnv:
             
     def _init_robot(self):
         # parameters
-        self.h = 0.2249# body height
+        self.h = 0.2249 # body height
         self.eePos = np.array( [[0.51589,    0.51589,   0.0575,     0.0575,     -0.45839,   -0.45839],
                                 [0.23145,   -0.23145,   0.5125,     -0.5125,    0.33105,    -0.33105],
                                 [-self.h,   -self.h,    -self.h,    -self.h,    -self.h,    -self.h]])# neutral position for the robot
@@ -120,28 +123,25 @@ class YunaEnv:
         self.step(init_pos, iteration=65, sleep='auto')
   
     def _cam_follow(self):
-        cam_pos, cam_orn = self._get_pose()
-        if not self.camerafollow:
-            cam_pos = [0, 0, 0.5]
+        cam_pos, cam_orn = self._get_body_pose()
         p.resetDebugVisualizerCamera(cameraDistance=2, cameraYaw=np.rad2deg(cam_orn[2])-90, cameraPitch=-35, cameraTargetPosition=cam_pos)
 
-    def _get_pose(self):
+    def _get_body_pose(self):
         pos, orn = p.getBasePositionAndOrientation(self.YunaID)
         return pos, p.getEulerFromQuaternion(orn)
 
     def _add_reference_line(self):
-        p.addUserDebugLine(lineFromXYZ=[-100,-100,0], lineToXYZ=[100,100,0], lineColorRGB=[0.5,0,0], lineWidth=10)
-        p.addUserDebugLine(lineFromXYZ=[-100,100,0], lineToXYZ=[100,-100,0], lineColorRGB=[0.5,0,0], lineWidth=10)
-        p.addUserDebugLine(lineFromXYZ=[-100,-173.2,0], lineToXYZ=[100,173.2,0], lineColorRGB=[0,0,0.5], lineWidth=10)
-        p.addUserDebugLine(lineFromXYZ=[-100,173.2,0], lineToXYZ=[100,-173.2,0], lineColorRGB=[0,0,0.5], lineWidth=10)
-        p.addUserDebugLine(lineFromXYZ=[-173.2,-100,0], lineToXYZ=[173.2,100,0], lineColorRGB=[0,0,0.5], lineWidth=10)
-        p.addUserDebugLine(lineFromXYZ=[-173.2,100,0], lineToXYZ=[173.2,-100,0], lineColorRGB=[0,0,0.5], lineWidth=10)
-        p.addUserDebugLine(lineFromXYZ=[-100,0,0], lineToXYZ=[100,0,0], lineColorRGB=[0,0,0], lineWidth=10)
-        p.addUserDebugLine(lineFromXYZ=[0,-100,0], lineToXYZ=[0,100,0], lineColorRGB=[0,0,0], lineWidth=10)
-
+        p.addUserDebugLine(lineFromXYZ=[-100,-100,0], lineToXYZ=[100,100,0], lineColorRGB=[0.5,0,0], lineWidth=1)
+        p.addUserDebugLine(lineFromXYZ=[-100,100,0], lineToXYZ=[100,-100,0], lineColorRGB=[0.5,0,0], lineWidth=1)
+        p.addUserDebugLine(lineFromXYZ=[-100,-173.2,0], lineToXYZ=[100,173.2,0], lineColorRGB=[0,0,0.5], lineWidth=1)
+        p.addUserDebugLine(lineFromXYZ=[-100,173.2,0], lineToXYZ=[100,-173.2,0], lineColorRGB=[0,0,0.5], lineWidth=1)
+        p.addUserDebugLine(lineFromXYZ=[-173.2,-100,0], lineToXYZ=[173.2,100,0], lineColorRGB=[0,0,0.5], lineWidth=1)
+        p.addUserDebugLine(lineFromXYZ=[-173.2,100,0], lineToXYZ=[173.2,-100,0], lineColorRGB=[0,0,0.5], lineWidth=1)
+        p.addUserDebugLine(lineFromXYZ=[-100,0,0], lineToXYZ=[100,0,0], lineColorRGB=[0,0,0], lineWidth=1)
+        p.addUserDebugLine(lineFromXYZ=[0,-100,0], lineToXYZ=[0,100,0], lineColorRGB=[0,0,0], lineWidth=1)
 
 if __name__=='__main__':
-    #test code
+    # test code
     yunaenv = YunaEnv(real_robot_control=0)
     time.sleep(3)
     yunaenv.close()

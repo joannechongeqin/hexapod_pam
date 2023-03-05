@@ -1,142 +1,90 @@
 from Yuna_TrajPlanner import TrajPlanner
-from Yuna_env import YunaEnv
+from Yuna_Env import YunaEnv
 import numpy as np
-from functions import rot, trans, solveFK
+from functions import solveFK
 
 class Yuna:
     def __init__(self, visualiser=True, camerafollow=True, real_robot_control=False, pybullet_on=True):
-        self.trajplanner = TrajPlanner()
         self.env = YunaEnv(visualiser=visualiser, camerafollow=camerafollow, real_robot_control=real_robot_control, pybullet_on=pybullet_on)
+        self.eePos = self.env.eePos.copy()
+        self.eeAng = np.array([0., 0., 0., 0., 0., 0.,]) # the diviation of each leg from neutral position, use 0. to initiate a float type array
+        self.current_pose = np.zeros((4, 6))
+
         self.real_robobt_control = real_robot_control
         self.xmk, self.imu, self.hexapod, self.fbk_imu, self.fbk_hp, self.group_command, self.group_feedback = self.env.xmk, self.env.imu, self.env.hexapod, self.env.fbk_imu, self.env.fbk_hp, self.env.group_command, self.env.group_feedback
-        self.maxstride = 0.3 # maximum stride length in metre
-        self.maxturn = 20 # maximum turn angle in degrees
-        self.eePos = self.env.eePos.copy()
-        self.current_pos = self.eePos.copy()
-        self.end_pos = self.eePos.copy()
-        self.eeAng = np.array([0., 0., 0., 0., 0., 0.,])#the diviation of each leg from neutral position, use 0. to initiate a float type array
-        self.current_ang = self.eeAng.copy()
-        self.end_ang = self.current_ang.copy()
-        self.traj_dim = self.trajplanner.swing_dim # trajectory dimension for walking and turning, both have same lenghth
-        self.walk_flag = 0 # a flag to record how many steps achieved in walking
-        self.turn_flag = 0 # a flag to record how many steps achieved in turning
-        self.tripod1 = [0 ,3, 4] # leg index for leg 1, 4, 5
-        self.tripod2 = [1, 2, 5] # leg index for leg 2, 3, 6
-        self.mode = 'none'
+        
+        self.trajplanner = TrajPlanner(neutralPos=self.eePos)
 
-    def walk(self, stride, angle=0, step=1):
-        if self.mode == 'turn':
-            self.stop()
-        stride = np.clip(stride, -self.maxstride, self.maxstride)
-        angle = np.radians(angle)
-        self.mode = 'walk'
-        for i in range(step):
-            traj = self._get_walk_traj(stride, angle)
+        self.max_step_len = 0.2 # maximum stride length in metre
+        self.max_rotation = 20 # maximum turn angle in degrees
+
+        self.traj_dim = self.trajplanner.traj_dim # trajectory dimension for walking and turning, they both have same lenghth
+        self.flag = 0 # a flag to record how many steps achieved
+        self.is_moving = False # Ture for moving and False for static
+
+    def step(self, step_len=0.2, course=0, rotation=0, steps=1):
+        '''
+        The function to enable Yuna robot step one stride forward
+
+        :param step_len: The step length the robot legs cover during its swing or stance phase, this is measured under robot body frame. The actual step length of first step is halved
+        :param course: The robot moving direction, this is measured under robot body frame
+        :param rotation: The rotation of robot body per step. The actual rotation of first step is halved
+        :return: None
+        '''
+        self.is_moving = True
+        # pre-processing of the input commands
+        step_len = np.clip(step_len, -self.max_step_len, self.max_step_len)
+        rotation = np.clip(rotation, -self.max_rotation, self.max_rotation)
+        course = np.deg2rad(course)
+        rotation = np.deg2rad(rotation)
+
+        for step in range(steps):
+            traj, end_pose = self.trajplanner.get_loco_traj(self.current_pose, step_len, course, rotation, self.flag)
             for i in range(self.traj_dim):
                 self.env.step(traj[i])
-            self.current_pos = traj[i].copy()
-            self.walk_flag += 1
-
-    def turn(self, deg_per_step, step=1):
-        if self.mode == 'stop':
-            self.stop()
-        deg_per_step = np.clip(deg_per_step, -self.maxturn, self.maxturn)
-        angle = np.radians(deg_per_step)
-        self.mode = 'turn'
-        for i in range(step):
-            traj = self._get_turn_traj(angle)
-            for i in range(self.traj_dim):
-                self.env.step(traj[i])
-            self.current_ang = self.end_ang.copy()
-            self.turn_flag += 1
+            self.current_pose = end_pose
+            self.flag += 1
 
     def stop(self):
-        if self.mode != 'none':
-            if self.mode == 'walk':
-                self.walk(0)
-            else:
-                self.turn(0)
-            self.mode = 'none'
+        '''
+        The function to stop Yuna's movements and reset Yuna's pose
+        '''
+        if self.is_moving:
+            self.step(0, 0, 0)
+            self.is_moving = False
     
     def disconnect(self):
+        '''
+        Disable real robot motors, disconnect from pybullet environment and exit the programme
+        '''
         self.env.close()
     
-    def _get_walk_traj(self, stride, angle):
-        traj = np.zeros((self.traj_dim, 3, 6))
-        self._get_walk_traget_pos(stride, angle)
-        if self.walk_flag % 2 == 0:
-            for leg_index in self.tripod1:
-                traj[:,:,leg_index] = self.trajplanner.walk_swing_traj(init_pos=self.current_pos[:, leg_index], end_pos=self.end_pos[:, leg_index])
-            for leg_index in self.tripod2:
-                traj[:,:,leg_index] = self.trajplanner.walk_support_traj(init_pos=self.current_pos[:, leg_index], end_pos=self.end_pos[:, leg_index])
-        else:
-            for leg_index in self.tripod1:
-                traj[:,:,leg_index] = self.trajplanner.walk_support_traj(init_pos=self.current_pos[:, leg_index], end_pos=self.end_pos[:, leg_index])
-            for leg_index in self.tripod2:
-                traj[:,:,leg_index] = self.trajplanner.walk_swing_traj(init_pos=self.current_pos[:, leg_index], end_pos=self.end_pos[:, leg_index])
-        return traj
-
-    def _get_turn_traj(self, angle):
-        traj = np.zeros((self.traj_dim, 3, 6))
-        self._get_turn_traget_ang(angle)
-        if self.turn_flag % 2 ==0:
-            for leg_index in self.tripod1:
-                traj[:,:,leg_index] = self.trajplanner.turn_swing_traj(neutral_pos=self.eePos[:,leg_index], init_ang=self.current_ang[leg_index], end_ang=self.end_ang[leg_index])
-            for leg_index in self.tripod2:
-                traj[:,:,leg_index] = self.trajplanner.turn_support_traj(neutral_pos=self.eePos[:,leg_index], init_ang=self.current_ang[leg_index], end_ang=self.end_ang[leg_index])
-        else:
-            for leg_index in self.tripod1:
-                traj[:,:,leg_index] = self.trajplanner.turn_support_traj(neutral_pos=self.eePos[:,leg_index], init_ang=self.current_ang[leg_index], end_ang=self.end_ang[leg_index])
-            for leg_index in self.tripod2:
-                traj[:,:,leg_index] = self.trajplanner.turn_swing_traj(neutral_pos=self.eePos[:,leg_index], init_ang=self.current_ang[leg_index], end_ang=self.end_ang[leg_index])
-        return traj
-
-    def _get_walk_traget_pos(self, stride, angle):
-        if stride == 0:
-            self.end_pos = self.eePos.copy()
-        else:
-            if self.walk_flag % 2 == 0:
-                for leg_index in self.tripod1:
-                    self.end_pos[:, leg_index] = trans(self.eePos[:,leg_index], stride/2, angle)
-                for leg_index in self.tripod2:
-                    self.end_pos[:, leg_index] = trans(self.eePos[:,leg_index], stride/2, angle + np.pi)
-            else:
-                for leg_index in self.tripod1:
-                    self.end_pos[:, leg_index] = trans(self.eePos[:,leg_index], stride/2, angle + np.pi)
-                for leg_index in self.tripod2:
-                    self.end_pos[:, leg_index] = trans(self.eePos[:,leg_index], stride/2, angle)
-    
-    def _get_turn_traget_ang(self, angle):
-        if angle == 0:
-            self.end_ang = self.eeAng.copy()
-        else:
-            if self.turn_flag % 2 == 0:
-                for leg_index in self.tripod1:
-                    self.end_ang[leg_index] = self.eeAng[leg_index] + angle / 2
-                for leg_index in self.tripod2:
-                    self.end_ang[leg_index] = self.eeAng[leg_index] - angle / 2
-            else:
-                for leg_index in self.tripod1:
-                    self.end_ang[leg_index] = self.eeAng[leg_index] - angle / 2
-                for leg_index in self.tripod2:
-                    self.end_ang[leg_index] = self.eeAng[leg_index] + angle / 2
+    def _get_current_pos(self):
+        current_pos = np.zeros((3, 6))
+        for leg_index in range(6):
+            current_pos[:, leg_index] = self.trajplanner.pose2pos(self.current_pose[:, leg_index], leg_index)
+        return current_pos
 
 if __name__ == '__main__':
-    # test motions
+    # motion test of yuna robot
+    import time
     yuna = Yuna()
+    print('There will be a series of robot movements with randomly generated parameters')
+    for motion in range(10):
+        step_len = np.random.uniform(0, yuna.max_step_len)
+        course = np.random.rand() * 360
+        rotation = np.random.uniform(-yuna.max_rotation, yuna.max_rotation)
+        steps = np.random.randint(1, 6)
+        print('Yuna command summary: step length = ' + str(np.around(step_len, decimals=4)) \
+                + ', course direction = ' + str(np.around(course, decimals=2)) \
+                + ', rotation angle = ' + str(np.around(rotation, decimals=2)) \
+                + ', step number = ' + str(np.around(steps, decimals=2)))
+        yuna.step(step_len, course, rotation, steps)
+        if np.random.rand() > 0.7:
+            yuna.stop()
+            time.sleep(1)
+            print('Yuna stopped')
 
-    yuna.walk(stride=-0.4, angle=0, step=3)#math.pi/2
-    yuna.stop()
-    yuna.walk(stride=0.05, angle=0,step=5)
-    yuna.walk(stride=0.3, angle=0,step=5)
-    yuna.walk(stride=0.1, angle=180,step=8)
-    yuna.walk(stride=0.1, angle=60,step=8)
-    yuna.walk(stride=0.1, angle=120,step=8)
-    yuna.walk(stride=0.1, angle=270,step=8)
-    yuna.stop()
-    yuna.turn(deg_per_step=30, step=6)
-    yuna.turn(deg_per_step=15, step=5)
-    yuna.walk(stride=0.1, angle=270,step=8)
-    yuna.turn(deg_per_step=-30, step=8)
-    yuna.turn(deg_per_step=5, step=8)
-    yuna.stop()
+    time.sleep(60)
+    yuna.disconnect()
+
