@@ -1,4 +1,5 @@
 # README
+
 ## How to use
 
 Run `main.py` to control the robot using a game controller  
@@ -16,6 +17,7 @@ Run `Yuna_TrajPlanner.py` to visualise thetrajectory of one foot
         5 ----- 6       +z     
 
 ## Functions for yuna maneuvering
+
 - `step()`
     - parameters:
         - `step_len : float`  
@@ -39,3 +41,12 @@ Run `Yuna_TrajPlanner.py` to visualise thetrajectory of one foot
 
 - `stop()`  
     By executing this, the robot will do an extra step to recover to the initial standing pose, if robot is already standing still, the robot will do nothing  
+
+## Understanding of Pose
+
+The pose refers to the tripod position and orientation with respect to the robot body frame. The frame that is rigidly attached to the centre of the tripod can be called a Task Coordinate. For the tripod gait, 3 legs share the same task coordinate, but for other gait patterns, each leg may have different task coordinates.  
+The overall pose matrix for the robot is a 4 by 6 numpy array, with each column stores the relative pose of each leg's task coordination, and 4 rows stands for relative $x$, $y$, $z$ and $\theta$ with respect to the body frame. At robot initial pose, all the task coordinations of each coincide with the body frame, thus the initial pose is `np.zeros((4,6))`. In the process of robot motion, the origin of the task coordination does the translational movement and the frame does the rotational movement about its z-axis
+
+<div align="center">
+   <img src="figure/tripod_traj.png" width="720"/>
+</div>
