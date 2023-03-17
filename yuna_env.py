@@ -20,6 +20,13 @@ class YunaEnv:
         self._init_robot()
 
     def step(self, targetPositions, iteration=1, sleep='auto'):
+        '''
+        Advance the simulation and physical robot by one step
+        :param targetPositions: the target position of the robot, either in the form of workspace command (shape=(3,6)) or jointspace command (shape=(18,))
+        :param iteration: the number of iterations to reach the target position, default is 1. If the given target position is not possible to reach within 1 step, more than 1 iteration could be set
+        :param sleep: the time to sleep after each step, default is 'auto', which means the time to sleep is automatically calculated based on the given frequency
+        return: None
+        '''
         # judge the input target position is workspace command or jointspace command
         if np.shape(targetPositions) == (3,6): # workspace command
             jointspace_command2bullet, jointspace_command2hebi = solveIK(targetPositions)
@@ -34,8 +41,12 @@ class YunaEnv:
             if self.real_robot_control:
                 self.group_command.position = jointspace_command2hebi - 0.3 * self.error
                 self.hexapod.send_command(self.group_command)
-                self.group_feedback = self.hexapod.get_next_feedback(reuse_fbk=self.group_feedback)
+                while True:
+                    self.group_feedback = self.hexapod.get_next_feedback(reuse_fbk=self.group_feedback)
+                    if type(self.group_feedback.position) != None:
+                        break
                 self.error = self.group_feedback.position - jointspace_command2hebi
+
             # pybullet control
             if self.pybullet_on:
                 p.setJointMotorControlArray(
@@ -54,6 +65,10 @@ class YunaEnv:
                 time.sleep(sleep)
 
     def close(self):
+        '''
+        Close the pybullet simulation, disable the real robot motors, and terminate the program
+        :return: None
+        '''
         if self.real_robot_control:
                 arr = np.zeros([1, 18])[0]
                 self.group_command.effort = arr
@@ -69,7 +84,10 @@ class YunaEnv:
         sys.exit()
 
     def robot_connect(self):
-        # initialise connection to the real robot
+        '''
+        Initialise connection to the real robot
+        :return: xmk, imu, hexapod, fbk_imu, fbk_hp, group_command, group_feedback
+        '''
         if self.real_robot_control:
             xmk, imu, hexapod, fbk_imu, fbk_hp = robot_setup.setup_xmonster()
             group_command = hebi.GroupCommand(hexapod.size)
@@ -85,6 +103,10 @@ class YunaEnv:
             return HexapodKinematics(), False, False, False, False, False, False
 
     def _load_env(self):
+        '''
+        Load and initialise the pybullet simulation environment
+        :return: None
+        '''
         # initialise interface
         if self.visualiser:
             self.physicsClient = p.connect(p.GUI)
@@ -114,23 +136,39 @@ class YunaEnv:
             p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1)
             
     def _init_robot(self):
+        '''
+        Initialise the robot to the neutral position in the pybullet simulation
+        :return: None
+        '''
         # parameters
         self.h = 0.2249 # body height
         self.eePos = np.array( [[0.51589,    0.51589,   0.0575,     0.0575,     -0.45839,   -0.45839],
                                 [0.23145,   -0.23145,   0.5125,     -0.5125,    0.33105,    -0.33105],
-                                [-self.h,   -self.h,    -self.h,    -self.h,    -self.h,    -self.h]])# neutral position for the robot
+                                [-self.h,   -self.h,    -self.h,    -self.h,    -self.h,    -self.h]]) # neutral position for the robot
         init_pos = self.eePos.copy()
         self.step(init_pos, iteration=65, sleep='auto')
   
     def _cam_follow(self):
-        cam_pos, cam_orn = self._get_body_pose()
+        '''
+        Follow the robot with the camera in the pybullet simulation
+        :return: None
+        '''
+        def _get_body_pose(self):
+            '''
+            Get the position and orientation of the robot in the pybullet simulation
+            :return pos: position of the robot in world frame
+            :return orn: orientation of the robot in world frame in Euler angles
+            '''
+            pos, orn = p.getBasePositionAndOrientation(self.YunaID)
+            return pos, p.getEulerFromQuaternion(orn)
+        cam_pos, cam_orn = _get_body_pose(self)
         p.resetDebugVisualizerCamera(cameraDistance=2, cameraYaw=np.rad2deg(cam_orn[2])-90, cameraPitch=-35, cameraTargetPosition=cam_pos)
 
-    def _get_body_pose(self):
-        pos, orn = p.getBasePositionAndOrientation(self.YunaID)
-        return pos, p.getEulerFromQuaternion(orn)
-
     def _add_reference_line(self):
+        '''
+        Add some reference lines to the pybullet simulation
+        :return: None
+        '''
         p.addUserDebugLine(lineFromXYZ=[-100,-100,0], lineToXYZ=[100,100,0], lineColorRGB=[0.5,0,0], lineWidth=1)
         p.addUserDebugLine(lineFromXYZ=[-100,100,0], lineToXYZ=[100,-100,0], lineColorRGB=[0.5,0,0], lineWidth=1)
         p.addUserDebugLine(lineFromXYZ=[-100,-173.2,0], lineToXYZ=[100,173.2,0], lineColorRGB=[0,0,0.5], lineWidth=1)

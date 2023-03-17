@@ -1,3 +1,6 @@
+'''
+This is a test of controller using pygame joystick module, you can use it to test your controller connection and get the button and axis information.
+'''
 import sys
 import pygame
 from pygame.locals import *
