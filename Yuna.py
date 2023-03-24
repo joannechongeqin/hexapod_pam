@@ -9,7 +9,8 @@ class Yuna:
         self.env = YunaEnv(visualiser=visualiser, camerafollow=camerafollow, real_robot_control=real_robot_control, pybullet_on=pybullet_on)
         self.eePos = self.env.eePos.copy()
         self.eeAng = np.array([0., 0., 0., 0., 0., 0.,]) # the diviation of each leg from neutral position, use 0. to initiate a float type array
-        self.current_pose = np.zeros((4, 6))
+        self.init_pose = np.zeros((4, 6))
+        self.current_pose = np.copy(self.init_pose)
 
         self.real_robot_control = real_robot_control
         self.xmk, self.imu, self.hexapod, self.fbk_imu, self.fbk_hp, self.group_command, self.group_feedback = self.env.xmk, self.env.imu, self.env.hexapod, self.env.fbk_imu, self.env.fbk_hp, self.env.group_command, self.env.group_feedback
@@ -46,12 +47,13 @@ class Yuna:
         '''
         self.get_step_params(*args, **kwargs)
 
-        if self.cmd_step_len == 0 and self.cmd_rotation == 0 and self.is_moving == False:
+        if self.cmd_step_len == 0.0 and self.cmd_rotation == 0.0 and np.equal(self.current_pose, self.init_pose).all():#
+            self.is_moving = False
             return False
         else:
             # change robot status and start moving
             self.is_moving = True
-            if self.step_len == 0 and self.rotation == 0: # robot executes a single step to stop
+            if self.cmd_step_len == 0 and self.cmd_rotation == 0: # robot executes a single step to stop
                 self.steps = 1
                 self.is_moving = False
             for step in range(int(self.steps)):
@@ -59,9 +61,10 @@ class Yuna:
                     self._smooth_step()
                     traj, end_pose = self.trajplanner.get_loco_traj(self.current_pose, self.step_len, self.course, self.rotation, self.flag, i)
                     self.env.step(traj)
-                self.current_pose = end_pose
+                self.current_pose = end_pose###
                 self.flag += 1
             return True
+        # TODO: the robot always make an extra step when already at nertual position, need to fix this
 
     def stop(self):
         '''
@@ -120,15 +123,18 @@ class Yuna:
 
     def _smooth_step(self):
         '''
-        This function is used to smooth the robot's movements to avoid abrupt changes in robot's pose
+        This function is used to smooth the robot's movements to avoid abrupt changes in robot's legs' task coordinate pose
         :return: None
         '''
         rho = 0.05# soft copy rate
         if self.smoothing:
             _pos = trans((0.,0.), self._step_len, self._course)
             cmd_pos = trans((0.,0.), self.cmd_step_len, self.cmd_course)
-            dist = np.linalg.norm(cmd_pos - _pos)
-            if dist < 0.05 and self.cmd_step_len == 0 and self.cmd_rotation == 0:
+            dpos = np.linalg.norm(cmd_pos - _pos)
+            _rot = self._rotation
+            cmd_rot = self.cmd_rotation
+            drot = np.rad2deg(np.abs(cmd_rot - _rot))
+            if dpos < 2 * self.max_step_len / 10  and drot < 2 * self.max_rotation / 10 and self.cmd_step_len == 0 and self.cmd_rotation == 0:
                 rho = 1
             pos = rho * cmd_pos + (1 - rho) * _pos
             self.step_len = np.sqrt(pos[0]**2 + pos[1]**2)

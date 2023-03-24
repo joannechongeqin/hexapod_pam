@@ -50,7 +50,7 @@ def confirmation_feedback(text):
     voice.endLoop()
     # p.s. the voice module is not used in a typical way, but this is a way that works without bugs for now
 
-command_frequency = 10 # Hz
+command_frequency = 15 # Hz
 def read_controller_thread():
     '''
     A second loop thread besides the main thread that reads the controller and sends commands to the robot at a constant frequency

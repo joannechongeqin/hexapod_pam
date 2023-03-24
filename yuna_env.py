@@ -1,5 +1,6 @@
 import pybullet as p
 import pybullet_data
+import numpy as np
 import os, sys
 import time
 import robot_setup
@@ -42,10 +43,12 @@ class YunaEnv:
                 self.group_command.position = jointspace_command2hebi - 0.3 * self.error
                 self.hexapod.send_command(self.group_command)
                 while True:
-                    self.group_feedback = self.hexapod.get_next_feedback(reuse_fbk=self.group_feedback)
-                    if type(self.group_feedback.position) != None:
+                    try:
+                        self.group_feedback = self.hexapod.get_next_feedback(reuse_fbk=self.group_feedback)
+                        self.error = self.group_feedback.position - jointspace_command2hebi
                         break
-                self.error = self.group_feedback.position - jointspace_command2hebi
+                    except:
+                        pass
 
             # pybullet control
             if self.pybullet_on:
@@ -141,7 +144,7 @@ class YunaEnv:
         :return: None
         '''
         # parameters
-        self.h = 0.2249 # body height
+        self.h = 0.12#0.2249 # body height
         self.eePos = np.array( [[0.51589,    0.51589,   0.0575,     0.0575,     -0.45839,   -0.45839],
                                 [0.23145,   -0.23145,   0.5125,     -0.5125,    0.33105,    -0.33105],
                                 [-self.h,   -self.h,    -self.h,    -self.h,    -self.h,    -self.h]]) # neutral position for the robot

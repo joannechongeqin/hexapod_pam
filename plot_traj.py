@@ -16,7 +16,10 @@ course = - np.pi / 6
 rotation = np.pi / 9
 init_pose =np.zeros((4,6))
 
-traj, end_pose = tp.get_loco_traj(init_pose=init_pose, step_len=step_len, course=course, rotation=rotation, flag=0)
+traj = np.zeros((tp.traj_dim, 3, 6))
+for timestep in range(tp.traj_dim):
+    for leg in range(6):
+        traj[timestep], end_pose = tp.get_loco_traj(init_pose=init_pose, step_len=step_len, course=course, rotation=rotation, flag=0, timestep=timestep)
 fig, ax = plt.subplots()
 t1, t2 = [], []
 flag = 0

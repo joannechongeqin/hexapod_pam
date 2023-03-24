@@ -178,8 +178,11 @@ if __name__ == '__main__':
     # compute trajectory
     end_pose = tp._get_end_pose(step_len, course, rotation)[:, leg_index]
     init_pose = - end_pose
-    traj_swing = tp._compute_traj(init_pose, end_pose, curve_type='swing', leg_index=leg_index)
-    traj_stance = tp._compute_traj(end_pose, init_pose, curve_type='stance', leg_index=leg_index)
+    traj_swing = np.zeros((tp.swing_dim, 3))
+    traj_stance = np.zeros((tp.stance_dim, 3))
+    for timestep in range(tp.traj_dim):
+        traj_swing[timestep] = tp._compute_traj(init_pose, end_pose, curve_type='swing', leg_index=leg_index, timestep=timestep)
+        traj_stance[timestep] = tp._compute_traj(end_pose, init_pose, curve_type='stance', leg_index=leg_index, timestep=timestep)
     traj = np.vstack((traj_swing, traj_stance))
     # plot
     x = traj[:, 0]
