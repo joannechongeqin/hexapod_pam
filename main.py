@@ -13,8 +13,10 @@ parking_mode = True # parking mode applies a small coefficient so that the robot
 # initialisation
 pygame.init()
 pygame.joystick.init()
-voice = pyttsx3.init()# voice module
-voice.setProperty('rate', 100)
+voice_on = False
+if voice_on:
+    voice = pyttsx3.init()# voice module
+    voice.setProperty('rate', 100)
 yuna = Yuna(real_robot_control=0, pybullet_on=1)
 # yuna.smoothing = False
 #================================================================================================
@@ -40,15 +42,16 @@ def confirmation_feedback(text):
     :param text: the command to be audiated and printed
     :return: None
     '''
-    print(text)
-    voice.say(text)
-    if voice._inLoop:
+    if voice_on:
+        print(text)
+        voice.say(text)
+        if voice._inLoop:
+            voice.endLoop()
+        voice.startLoop(False)
+        voice.iterate()
+        time.sleep(2)
         voice.endLoop()
-    voice.startLoop(False)
-    voice.iterate()
-    time.sleep(2)
-    voice.endLoop()
-    # p.s. the voice module is not used in a typical way, but this is a way that works without bugs for now
+        # p.s. the voice module is not used in a typical way, but this is a way that works without bugs for now
 
 command_frequency = 15 # Hz
 def read_controller_thread():

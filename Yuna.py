@@ -23,13 +23,13 @@ class Yuna:
         self.step_len = 0. # stride length in metre
         self.course = 0. # course angle in degrees
         self.rotation = 0. # turn angle in degrees
-        self.steps = 1 # number of steps to take
         self._step_len = np.copy(self.step_len) # record the last step length
         self._course = np.copy(self.course) # record the last step course
         self._rotation = np.copy(self.rotation) # record the last step rotation
         self.cmd_step_len = np.copy(self.step_len)
         self.cmd_course = np.copy(self.course)
         self.cmd_rotation = np.copy(self.rotation)
+        self.cmd_steps = 1 # number of steps to take
 
         self.traj_dim = self.trajplanner.traj_dim # trajectory dimension for walking and turning, they both have same lenghth
         self.flag = 0 # a flag to record how many steps achieved
@@ -39,13 +39,15 @@ class Yuna:
     def step(self, *args, **kwargs):
         '''
         The function to enable Yuna robot step one stride forward, the parameters are get from get_step_params() or manually set
-        :param step_len: The step length the robot legs cover during its swing or stance phase, this is measured under robot body frame. The actual step length of first step is halved
+        :param step_len: The step length the robot legs cover during its swing or stance phase in metres, this is measured under robot body frame. The actual step length of first step is halved
         :param course: The robot moving direction, this is measured under robot body frame
-        :param rotation: The rotation of robot body per step. The actual rotation of first step is halved
+        :param rotation: The rotation of robot body per step in radians. The actual rotation of first step is halved
         :param steps: The number of steps the robot will take
         :return: if the step is executed, return True, else return False
         '''
         self.get_step_params(*args, **kwargs)
+        cmd_steps = self.cmd_steps
+        self.cmd_steps = 1
 
         if self.cmd_step_len == 0.0 and self.cmd_rotation == 0.0 and np.equal(self.current_pose, self.init_pose).all():#
             self.is_moving = False
@@ -54,17 +56,50 @@ class Yuna:
             # change robot status and start moving
             self.is_moving = True
             if self.cmd_step_len == 0 and self.cmd_rotation == 0: # robot executes a single step to stop
-                self.steps = 1
+                cmd_steps = 1
                 self.is_moving = False
-            for step in range(int(self.steps)):
+            for step in range(int(cmd_steps)):
                 for i in range(self.traj_dim):
                     self._smooth_step()
                     traj, end_pose = self.trajplanner.get_loco_traj(self.current_pose, self.step_len, self.course, self.rotation, self.flag, i)
                     self.env.step(traj)
-                self.current_pose = end_pose###
+                self.current_pose = end_pose
                 self.flag += 1
             return True
-        # TODO: the robot always make an extra step when already at nertual position, need to fix this
+        
+    def goto(self, dx, dy, dtheta):
+        '''
+        Function to move Yuna robot to a specific position
+        :param dx: The x-axis displacement in metres
+        :param dy: The y-axis displacement in metres
+        :param dtheta: The rotation of robot body orientation in degrees
+        '''
+        self.smoothing = False # disable step smoothing for more accurate positioning
+        cor_coeff_disp = 1.075
+        cor_coeff_ang = 1.053
+        dx, dy, dtheta = dx*cor_coeff_disp, dy*cor_coeff_disp, dtheta*cor_coeff_ang
+        lin_disp = np.sqrt(dx**2 + dy**2)
+        ang_disp = np.abs(dtheta)
+        lin_steps = np.ceil(lin_disp / self.max_step_len)
+        ang_steps = np.ceil(ang_disp / self.max_rotation)
+        steps = np.int64(np.max((lin_steps, ang_steps)))
+
+        step_len = lin_disp / steps
+        course = np.rad2deg(np.arctan2(dy, dx))
+        rotation = np.sign(dtheta) * ang_disp / steps
+
+        for step in range(steps):
+            self.step(step_len=step_len, course=course, rotation=rotation)
+            course -= rotation
+            # if step == 0:
+            #     course -= rotation/2
+            # else:
+            #     course -= rotation
+            
+
+        self.stop()
+
+        self.smoothing = True
 
     def stop(self):
         '''
@@ -72,7 +107,7 @@ class Yuna:
         :return: None
         '''
         if self.is_moving:
-            self.step(0)
+            self.step(step_len=0,rotation=0)
             self.is_moving = False
     
     def disconnect(self):
@@ -144,6 +179,10 @@ class Yuna:
             self._step_len = np.copy(self.step_len)
             self._course = np.copy(self.course)
             self._rotation = np.copy(self.rotation)
+        else:
+            self.step_len = self.cmd_step_len
+            self.course = self.cmd_course
+            self.rotation = self.cmd_rotation
     
     def _get_current_pos(self):
         '''

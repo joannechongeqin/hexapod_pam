@@ -165,7 +165,8 @@ class YunaEnv:
             pos, orn = p.getBasePositionAndOrientation(self.YunaID)
             return pos, p.getEulerFromQuaternion(orn)
         cam_pos, cam_orn = _get_body_pose(self)
-        p.resetDebugVisualizerCamera(cameraDistance=2, cameraYaw=np.rad2deg(cam_orn[2])-90, cameraPitch=-35, cameraTargetPosition=cam_pos)
+        # p.resetDebugVisualizerCamera(cameraDistance=2, cameraYaw=np.rad2deg(cam_orn[2])-90, cameraPitch=-35, cameraTargetPosition=cam_pos)#
+        p.resetDebugVisualizerCamera(cameraDistance=2, cameraYaw=-90, cameraPitch=-35, cameraTargetPosition=cam_pos)
 
     def _add_reference_line(self):
         '''

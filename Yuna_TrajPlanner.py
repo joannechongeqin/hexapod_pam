@@ -25,7 +25,7 @@ class TrajPlanner:
         Compute the leg trajectories of all six legs within a stride
         :param init_pose: initial pose of all six legs' task coordinate frame
         :param step_len: step length, translational displacement of the leg's task coordinate frame with respect to the body frame
-        :param course: course angle
+        :param course: course angle in radians
         :param rotation: rotation angle, rotational displacement of the leg's task coordinate frame with respect to the body frame
         :param flag: use the parity of the flag to determine which set of tripod to move forward, odd flag for tripod1, even flag for tripod2
         :param timestep: current timestep
@@ -45,7 +45,7 @@ class TrajPlanner:
         '''
         Compute the end pose of each leg's task coordinate frame
         :param step_len: step length, translational displacement of the leg's task coordinate frame with respect to the body frame
-        :param course: course angle
+        :param course: course angle in radians
         :param rotation: rotation angle, rotational displacement of the leg's task coordinate frame with respect to the body frame
         :param flag: use the parity of the flag to determine which set of tripod to move forward, odd flag for tripod1, even flag for tripod2
         :return end_pose: end pose of all six legs' task coordinate frame
