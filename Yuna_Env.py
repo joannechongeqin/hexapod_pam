@@ -5,7 +5,7 @@ import os, sys
 import time
 import robot_setup
 from robot_setup.yunaKinematics import *
-from functions import hebi2bullet, solveIK
+from functions import hebi2bullet, bullet2hebi, solveIK
 
 class YunaEnv:
     def __init__(self, real_robot_control=True, pybullet_on=True, visualiser=True, camerafollow=True):
@@ -181,6 +181,18 @@ class YunaEnv:
         p.addUserDebugLine(lineFromXYZ=[-173.2,100,0], lineToXYZ=[173.2,-100,0], lineColorRGB=[0,0,0.5], lineWidth=1)
         p.addUserDebugLine(lineFromXYZ=[-100,0,0], lineToXYZ=[100,0,0], lineColorRGB=[0,0,0], lineWidth=1)
         p.addUserDebugLine(lineFromXYZ=[0,-100,0], lineToXYZ=[0,100,0], lineColorRGB=[0,0,0], lineWidth=1)
+    
+    def get_robot_config(self):
+        '''
+        Get the robot joint configuration
+        :return robot_config: robot joint configuration
+        '''
+        if self.real_robot_control:
+            robot_config = self.group_feedback.position
+        else:
+            robot_config = bullet2hebi(np.array([p.getJointState(self.YunaID, i)[0] for i in self.actuator]))
+
+        return robot_config
 
 if __name__=='__main__':
     # test code

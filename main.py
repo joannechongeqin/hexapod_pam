@@ -4,7 +4,6 @@ from Yuna import Yuna
 import numpy as np
 import time
 import threading
-import pyttsx3
 
 # state global variables
 global joystick_added, parking_mode, controller
@@ -15,6 +14,7 @@ pygame.init()
 pygame.joystick.init()
 voice_on = False
 if voice_on:
+    import pyttsx3
     voice = pyttsx3.init()# voice module
     voice.setProperty('rate', 100)
 yuna = Yuna(real_robot_control=0, pybullet_on=1)

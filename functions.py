@@ -33,9 +33,21 @@ def hebi2bullet(jointspace_command2hebi):
     :param jointspace_command2hebi: the jointspace command for hebi, whose size is (18,) and order is [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18]
     :return: the jointspace command for pybullet, whose size is (18,) and order is [1,2,3,7,8,9,13,14,15,4,5,6,10,11,12,16,17,18]
     '''
-    # reorder the jointspace command so that it can work in pybullet
+    if type(jointspace_command2hebi) == list:
+        jointspace_command2hebi = np.array(jointspace_command2hebi)
     jointspace_command2bullet = jointspace_command2hebi[[0,1,2,6,7,8,12,13,14,3,4,5,9,10,11,15,16,17,]].copy()# reshaped the IK result: 123456->135246
     return jointspace_command2bullet
+
+def bullet2hebi(jointspace_command2bullet):
+    '''
+    Convert the jointspace command for pybullet to the jointspace command for hebi
+    :param jointspace_command2bullet: the jointspace command for pybullet, whose size is (18,) and order is [1,2,3,7,8,9,13,14,15,4,5,6,10,11,12,16,17,18]
+    :return: the jointspace command for hebi, whose size is (18,) and order is [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,7,8,9]
+    '''
+    if type(jointspace_command2bullet) == list:
+        jointspace_command2bullet = np.array(jointspace_command2bullet)
+    jointspace_command2hebi = jointspace_command2bullet[[0,1,2,9,10,11,3,4,5,12,13,14,6,7,8,15,16,17,]].copy()# reshaped the IK result: 135246->123456
+    return jointspace_command2hebi
     
 def solveIK(workspace_command):
     '''
