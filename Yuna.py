@@ -7,8 +7,8 @@ class Yuna:
     def __init__(self, visualiser=True, camerafollow=True, real_robot_control=False, pybullet_on=True):
         # initialise the environment
         self.env = YunaEnv(visualiser=visualiser, camerafollow=camerafollow, real_robot_control=real_robot_control, pybullet_on=pybullet_on)
-        self.eePos = self.env.eePos.copy()
-        self.eeAng = np.array([0., 0., 0., 0., 0., 0.,]) # the diviation of each leg from neutral position, use 0. to initiate a float type array
+        self.eePos = self.env.eePos.copy() # robot leg end-effecter position w.r.t body frame
+        self.eeAng = np.array([0., 0., 0., 0., 0., 0.,]) # the deviation of each leg from neutral position, use 0. to initiate a float type array
         self.init_pose = np.zeros((4, 6))
         self.current_pose = np.copy(self.init_pose)
 
@@ -23,15 +23,15 @@ class Yuna:
         self.step_len = 0. # stride length in metre
         self.course = 0. # course angle in degrees
         self.rotation = 0. # turn angle in degrees
-        self._step_len = np.copy(self.step_len) # record the last step length
+        self._step_len = np.copy(self.step_len) # record the last step length  # actual step length that the robot will take, may be a smoothed version of cmd_step_len
         self._course = np.copy(self.course) # record the last step course
         self._rotation = np.copy(self.rotation) # record the last step rotation
-        self.cmd_step_len = np.copy(self.step_len)
+        self.cmd_step_len = np.copy(self.step_len)  # target step length for the robot to achieve, based on user commands, set by the get_step_params method
         self.cmd_course = np.copy(self.course)
         self.cmd_rotation = np.copy(self.rotation)
         self.cmd_steps = 1 # number of steps to take
 
-        self.traj_dim = self.trajplanner.traj_dim # trajectory dimension for walking and turning, they both have same lenghth
+        self.traj_dim = self.trajplanner.traj_dim # trajectory dimension for walking and turning, they both have same length
         self.flag = 0 # a flag to record how many steps achieved
         self.is_moving = False # Ture for moving and False for static
         self.smoothing = True # Set to True to enable step smoothing
@@ -48,7 +48,8 @@ class Yuna:
         self.get_step_params(*args, **kwargs)
         cmd_steps = self.cmd_steps
         self.cmd_steps = 1
-
+        
+        # if no movement is commanded and robot is stationary at initial position, then no movement
         if self.cmd_step_len == 0.0 and self.cmd_rotation == 0.0 and np.equal(self.current_pose, self.init_pose).all():#
             self.is_moving = False
             return False
@@ -161,16 +162,23 @@ class Yuna:
         This function is used to smooth the robot's movements to avoid abrupt changes in robot's legs' task coordinate pose
         :return: None
         '''
-        rho = 0.05# soft copy rate
+        rho = 0.05 # soft copy rate (A smaller rho value smoother transitions, a larger value more immediate transitions)
         if self.smoothing:
+            # calculate diff in position
             _pos = trans((0.,0.), self._step_len, self._course)
             cmd_pos = trans((0.,0.), self.cmd_step_len, self.cmd_course)
             dpos = np.linalg.norm(cmd_pos - _pos)
+            
+            # calculate diff in rotation
             _rot = self._rotation
             cmd_rot = self.cmd_rotation
             drot = np.rad2deg(np.abs(cmd_rot - _rot))
+            
+            # if the robot's current movement is close enough to the command movement, and command step length and rotation are zero
             if dpos < 2 * self.max_step_len / 10  and drot < 2 * self.max_rotation / 10 and self.cmd_step_len == 0 and self.cmd_rotation == 0:
                 rho = 1
+                
+            # apply smoothing
             pos = rho * cmd_pos + (1 - rho) * _pos
             self.step_len = np.sqrt(pos[0]**2 + pos[1]**2)
             self.course = np.arctan2(pos[1], pos[0])

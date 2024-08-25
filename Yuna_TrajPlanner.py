@@ -7,19 +7,19 @@ eePos = np.array([[0.51589,    0.51589,   0.0575,     0.0575,     -0.45839,   -0
                   [-0.2249,   -0.2249,    -0.2249,    -0.2249,    -0.2249,    -0.2249]])
 class TrajPlanner:
     def __init__(self, neutralPos=eePos):
-        self.dutyfactor = 0.5
-        self.period = 1.0 
-        self.dt = 1/240 # pybullet default
+        self.dutyfactor = 0.5 # percent of the total cycle which a given foot is on the ground = time foot is on the ground (stance phase) / total time of gait cycle
+        self.period = 1.0 #  total duration of the gait period 
+        self.dt = 1/240 # pybullet default  # time step duration
         self.eePos = neutralPos
-        self.eeAng = np.array([0., 0., 0., 0., 0., 0.,]) # the diviation of each leg from neutral position, use 0. to initiate a float type array
+        self.eeAng = np.array([0., 0., 0., 0., 0., 0.,]) # the deviation of each leg from neutral position, use 0. to initiate a float type array
         self.array_dim = int(np.around(self.period / self.dt)) # timesteps of a complete period
         self.stance_dim = int(np.around(self.period * self.dutyfactor / self.dt)) # 120
         self.swing_dim = self.array_dim - self.stance_dim # 120
         self.traj_dim = np.maximum(self.swing_dim, self.stance_dim)
         self.clearance = 0.1 # maximum foot clearance when the robot lifts its leg
-        self.tripod1 = [0 ,3, 4] # leg index for leg 1, 4, 5
-        self.tripod2 = [1, 2, 5] # leg index for leg 2, 3, 6
-    
+        self.tripod1 = [0 ,3, 4] # leg index for leg 1, 4, 5 (left front, left back, right middle)
+        self.tripod2 = [1, 2, 5] # leg index for leg 2, 3, 6 (right front, right back, left middle)
+
     def get_loco_traj(self, init_pose, step_len, course, rotation, flag, timestep):
         '''
         Compute the leg trajectories of all six legs within a stride
@@ -32,11 +32,12 @@ class TrajPlanner:
         :return traj: position of all six legs at a given timestep
         :return end_pose: desired end pose of this trajectory of all six legs' task coordinate frame
         '''
-        traj = np.zeros((3, 6))
-        end_pose = self._get_end_pose(step_len, course, rotation, flag)
+        traj = np.zeros((3, 6)) # initializes a 3x6 matrix to store the computed positions of all six legs at the given timestep
+        end_pose = self._get_end_pose(step_len, course, rotation, flag) # a 4x6 matrix, calculate the desired end pose for each leg based on the step length, course, rotation, and the flag
         curve_type = ['swing', 'stance', 'stance', 'swing', 'swing', 'stance'] if flag % 2 == 0 else ['stance', 'swing', 'swing', 'stance', 'stance' , 'swing']
 
         for leg_index in range(6):
+            # traj[:,leg_index] gets column leg_index fo the traj matrix
             traj[:,leg_index] = self._compute_traj(init_pose[:,leg_index], end_pose[:,leg_index], curve_type[leg_index], leg_index, timestep)
         
         return traj, end_pose
@@ -50,14 +51,16 @@ class TrajPlanner:
         :param flag: use the parity of the flag to determine which set of tripod to move forward, odd flag for tripod1, even flag for tripod2
         :return end_pose: end pose of all six legs' task coordinate frame
         '''
-        end_pos = np.zeros((3, 6))
-        end_ang = np.zeros((6,))
-        neutral_pose = np.zeros((4,1))
-        if flag % 2==0:
+        end_pos = np.zeros((3, 6)) # initialize a 3x6 array to store the final pos for each of the 6 legs
+        end_ang = np.zeros((6,)) # initialize a 1x6 array to store the final orientation for each of the 6 legs
+        neutral_pose = np.zeros((4,1)) # a 4x1 array, reference point for calculating the end poses of the legs
+        if flag % 2 == 0: # swing tripod1 forward
             for leg_index in self.tripod1:
-                end_pos[:, leg_index] = np.reshape(trans(neutral_pose[:3], +step_len/2, course), (3,))
-                end_ang[leg_index] = neutral_pose[3] + rotation / 2
+                # moves tripod1 forward relative to the body
+                end_pos[:, leg_index] = np.reshape(trans(neutral_pose[:3], +step_len/2, course), (3,)) # compute the end position by translate +step_len/2 from the neutral_pose by in the direction specified by course
+                end_ang[leg_index] = neutral_pose[3] + rotation / 2 # compute the end orientation
             for leg_index in self.tripod2:
+                # moves tripod2 backward relative to the body
                 end_pos[:, leg_index] = np.reshape(trans(neutral_pose[:3], -step_len/2, course), (3,))
                 end_ang[leg_index] = neutral_pose[3] - rotation / 2
         else:
