@@ -66,6 +66,9 @@ class Yuna:
                     self.env.step(traj)
                 self.current_pose = end_pose
                 self.flag += 1
+                # print("current_pose", self.current_pose)
+                # print("eePos", self.eePos)
+                # print("eeAng", self.eeAng)               
             return True
         
     def goto(self, dx, dy, dtheta):
@@ -96,10 +99,7 @@ class Yuna:
             #     course -= rotation/2
             # else:
             #     course -= rotation
-            
-
         self.stop()
-
         self.smoothing = True
 
     def stop(self):
@@ -110,6 +110,25 @@ class Yuna:
         if self.is_moving:
             self.step(step_len=0,rotation=0)
             self.is_moving = False
+            
+    def move_leg(self, leg_index, dx, dy, dz):
+        # get current position, make a copy for new position
+        initial_pos = self._get_current_pos()
+        new_pos = np.copy(initial_pos)
+        
+        # update position for the specified leg
+        new_pos[:, leg_index] += np.array([dx, dy, dz])
+        
+        # plan and execute trajectory
+        waypoints = [initial_pos, new_pos]
+        traj = self.trajplanner.general_traj(waypoints)
+        # print(traj.shape, traj)
+        for traj_point in traj:
+            self.env.step(traj_point)
+        
+        # update current pose end-effector position
+        self.current_pose[:, leg_index] += [dx, dy, dz, 0]
+        self.eePos = np.copy(new_pos) # IDK IF NEED THIS (feels like not used anywhere else)
     
     def disconnect(self):
         '''

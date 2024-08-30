@@ -36,10 +36,12 @@ class TrajPlanner:
         end_pose = self._get_end_pose(step_len, course, rotation, flag) # a 4x6 matrix, calculate the desired end pose for each leg based on the step length, course, rotation, and the flag
         curve_type = ['swing', 'stance', 'stance', 'swing', 'swing', 'stance'] if flag % 2 == 0 else ['stance', 'swing', 'swing', 'stance', 'stance' , 'swing']
 
+        # print("init_pose:", init_pose)
+        # print('end_pose:', end_pose)
         for leg_index in range(6):
             # traj[:,leg_index] gets column leg_index fo the traj matrix
             traj[:,leg_index] = self._compute_traj(init_pose[:,leg_index], end_pose[:,leg_index], curve_type[leg_index], leg_index, timestep)
-        
+        # print("traj:", traj)
         return traj, end_pose
     
     def _get_end_pose(self, step_len, course, rotation, flag=0): # use flag to determine which set of tripod to move forward
@@ -63,7 +65,7 @@ class TrajPlanner:
                 # moves tripod2 backward relative to the body
                 end_pos[:, leg_index] = np.reshape(trans(neutral_pose[:3], -step_len/2, course), (3,))
                 end_ang[leg_index] = neutral_pose[3] - rotation / 2
-        else:
+        else: # swing tripod2 forward
             for leg_index in self.tripod1:
                 end_pos[:, leg_index] = np.reshape(trans(neutral_pose[:3], -step_len/2, course), (3,))
                 end_ang[leg_index] = neutral_pose[3] - rotation / 2
@@ -79,7 +81,7 @@ class TrajPlanner:
         Compute the position of each leg from the pose of leg's task coordinate frame
         :param pose: 4x1 array, pose of leg's task coordinate frame with respect to body frame
         :param leg_index: int, index of leg
-        :return pos: position of leg
+        :return pos: position of leg (xyz)
         '''
         pos = rot(pos=self.eePos[:,leg_index]+pose[:3], angle=pose[3], pivot=pose[:3])
         return pos
@@ -111,8 +113,8 @@ class TrajPlanner:
             y = c * (1 - 2 * cos(t) + 1) / 4
         where s stands for step length and c stands for foot clearance
 
-        :param init_pose: initial pose of the each leg'g task coordinate with respect to the body frame
-        :param end_pose: end pose of the each leg'g task coordinate with respect to the body frame
+        :param init_pose: initial pose of the each leg's task coordinate with respect to the body frame
+        :param end_pose: end pose of the each leg's task coordinate with respect to the body frame
         :param curve_type: 'swing' or 'stance'
         :param leg_index: index of the leg
         :param timestep: correponding timestep of the desired waypoint within a stride trajectory
@@ -133,7 +135,7 @@ class TrajPlanner:
             traj = self.pose2pos(pose, leg_index)
         else:
             raise ValueError('Wrong curve type, the available types are: \'swing\' or \'stance\'.')
-
+        
         return traj
 
     def general_traj(self, waypoints, total_time=1, time_vector=[]):
@@ -154,6 +156,7 @@ class TrajPlanner:
                 jointspace_command[:,i] = waypoints[i]
             else:
                 raise ValueError('Command that Yuna cannot recognise')
+        # print("jointspace_command:", jointspace_command)
         # default time vector, assuming the time is evenly distributed, otherwise please assign customised time vector in argument
         if not time_vector:
             interval = total_time / (num_pos - 1)
