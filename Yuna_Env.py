@@ -35,6 +35,7 @@ class YunaEnv:
             jointspace_command2bullet, jointspace_command2hebi = hebi2bullet(targetPositions), targetPositions
         else:
             raise ValueError('Command that Yuna cannot recognise, please input either workspace command whose shape(targetPositions)=(3,6), or jointspace command whose shape(targetPositions)=(18,)')
+        # print("step::jointspace_command2hebi", jointspace_command2hebi)      
         
         for i in range(iteration): # iteration is usually 1, but if the given target position is not possible to reach within 1 step, more than 1 iteration could be set
             t_start = time.perf_counter()
@@ -132,6 +133,11 @@ class YunaEnv:
         self.YunaID = p.loadURDF(Yuna_file_path, Yuna_init_pos, Yuna_init_orn)
         self.joint_num = p.getNumJoints(self.YunaID)
         self.actuator = [i for i in range(self.joint_num) if p.getJointInfo(self.YunaID,i)[2] != p.JOINT_FIXED]
+        # load wall
+        wall_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=[1, 0.05, 0.5])
+        wall_position = [0, 1, 0.5]
+        wall_orientation = [0, 0, 0, 1] 
+        self.wallID = p.createMultiBody(baseMass=0, baseCollisionShapeIndex=wall_shape, basePosition=wall_position, baseOrientation=wall_orientation)
         
         if self.visualiser:
             self._add_reference_line()
@@ -144,7 +150,7 @@ class YunaEnv:
         :return: None
         '''
         # parameters
-        self.h = 0.12#0.2249 # body height
+        self.h = 0.12 #0.2249 # body height
         self.eePos = np.array( [[0.51589,    0.51589,   0.0575,     0.0575,     -0.45839,   -0.45839],
                                 [0.23145,   -0.23145,   0.5125,     -0.5125,    0.33105,    -0.33105],
                                 [-self.h,   -self.h,    -self.h,    -self.h,    -self.h,    -self.h]]) # neutral position for the robot
