@@ -3,6 +3,8 @@ from Yuna_Env import YunaEnv
 import numpy as np
 from functions import trans
 import time
+from functions import solveFK
+
 class Yuna:
     def __init__(self, visualiser=True, camerafollow=True, real_robot_control=False, pybullet_on=True):
         # initialise the environment
@@ -66,9 +68,7 @@ class Yuna:
                     self.env.step(traj)
                 self.current_pose = end_pose
                 self.flag += 1
-                # print("current_pose", self.current_pose)
-                # print("eePos", self.eePos)
-                # print("eeAng", self.eeAng)               
+             
             return True
         
     def goto(self, dx, dy, dtheta):
@@ -110,8 +110,17 @@ class Yuna:
         if self.is_moving:
             self.step(step_len=0,rotation=0)
             self.is_moving = False
-            
+    def raise_leg(self, leg_index, dz=0.1):
+        '''
+        Raise a specific leg by dz
+        '''
+        self.move_leg(leg_index, 0, 0, dz)
+        
+               
     def move_leg(self, leg_index, dx, dy, dz):
+        '''
+        Move a specific leg to a new position by dx, dy, dz
+        '''
         # get current position, make a copy for new position
         initial_pos = self._get_current_pos()
         new_pos = np.copy(initial_pos)
@@ -128,8 +137,27 @@ class Yuna:
         
         # update current pose end-effector position
         self.current_pose[:, leg_index] += [dx, dy, dz, 0]
-        self.eePos = np.copy(new_pos) # IDK IF NEED THIS (feels like not used anywhere else)
-    
+        
+    def move_legs(self, move_by_pos):
+        '''
+        Move multiple legs at the same time
+        move_by_pos: 3x6 array, each column is the dx dy dz of each leg
+        '''
+        # get current position, make a copy for new position
+        initial_pos = self._get_current_pos()
+        new_pos = np.copy(initial_pos) + move_by_pos
+        
+        # plan and execute trajectory
+        waypoints = [initial_pos, new_pos]
+        traj = self.trajplanner.general_traj(waypoints)
+        # print(traj.shape, traj)
+        for traj_point in traj:
+            self.env.step(traj_point)
+            
+         # update current pose end-effector position
+        self.current_pose += np.vstack((move_by_pos, np.zeros((1, 6))))
+        
+  
     def disconnect(self):
         '''
         Disable real robot motors, disconnect from pybullet environment and exit the programme
