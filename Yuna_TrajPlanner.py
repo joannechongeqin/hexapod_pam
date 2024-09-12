@@ -1,6 +1,6 @@
 import numpy as np
 import hebi
-from functions import solveIK, rot, trans
+from functions import solveIK, rotz, trans
 # default robot leg end-effecter position w.r.t body frame
 eePos = np.array([[0.51589,    0.51589,   0.0575,     0.0575,     -0.45839,   -0.45839],
                   [0.23145,   -0.23145,   0.5125,     -0.5125,    0.33105,    -0.33105],
@@ -79,51 +79,51 @@ class TrajPlanner:
         end_pose = np.vstack((end_pos, end_ang))
         return end_pose
     
-    def get_quadruped_traj(self, init_pose, step_len, course, rotation, flag, timestep):
-        traj = np.zeros((3, 6))
+    # def get_quadruped_traj(self, init_pose, step_len, course, rotation, flag, timestep):
+    #     traj = np.zeros((3, 6))
 
-        curve_type = ['stance'] * 6
-        if flag == 0 or flag % 3 == 0:
-            for leg_index in self.quad1:
-                curve_type[leg_index] = 'swing'
-        elif (flag - 1) % 3 == 0:
-            for leg_index in self.quad2:
-                curve_type[leg_index] = 'swing'
-        else: 
-            for leg_index in self.quad3:
-                curve_type[leg_index] = 'swing'
+    #     curve_type = ['stance'] * 6
+    #     if flag == 0 or flag % 3 == 0:
+    #         for leg_index in self.quad1:
+    #             curve_type[leg_index] = 'swing'
+    #     elif (flag - 1) % 3 == 0:
+    #         for leg_index in self.quad2:
+    #             curve_type[leg_index] = 'swing'
+    #     else: 
+    #         for leg_index in self.quad3:
+    #             curve_type[leg_index] = 'swing'
         
-        end_pose = self._get_quadruped_end_pose(step_len, course, rotation, flag)
-        for leg_index in range(6):
-            traj[:, leg_index] = self._compute_traj(init_pose[:, leg_index], end_pose[:, leg_index], curve_type[leg_index], leg_index, timestep)
-        return traj, end_pose
+    #     end_pose = self._get_quadruped_end_pose(step_len, course, rotation, flag)
+    #     for leg_index in range(6):
+    #         traj[:, leg_index] = self._compute_traj(init_pose[:, leg_index], end_pose[:, leg_index], curve_type[leg_index], leg_index, timestep)
+    #     return traj, end_pose
 
-    # NOTE: there is a weird drift in second step and last step, and actual distance / angle reached is wrong compared to the desired distance / angle
-    #       ^ not sure if i interpreted "pose" wrongly, or is just my math problem :(
-    def _get_quadruped_end_pose(self, step_len, course, rotation, flag=0):
-        end_pos = np.zeros((3, 6))
-        end_ang = np.zeros((6,))
-        neutral_pose = np.zeros((4,1))
+    # # NOTE: there is a weird drift in second step and last step, and actual distance / angle reached is wrong compared to the desired distance / angle
+    # #       ^ not sure if i interpreted "pose" wrongly, or is just my math problem :(
+    # def _get_quadruped_end_pose(self, step_len, course, rotation, flag=0):
+    #     end_pos = np.zeros((3, 6))
+    #     end_ang = np.zeros((6,))
+    #     neutral_pose = np.zeros((4,1))
         
-        def update_legs(legs, step_sign, rot_sign):
-            for leg_index in legs:
-                end_pos[:, leg_index] = np.reshape(trans(neutral_pose[:3], step_sign * step_len / 3, course), (3,))
-                end_ang[leg_index] = neutral_pose[3] + rot_sign * rotation / 3
+    #     def update_legs(legs, step_sign, rot_sign):
+    #         for leg_index in legs:
+    #             end_pos[:, leg_index] = np.reshape(trans(neutral_pose[:3], step_sign * step_len / 3, course), (3,))
+    #             end_ang[leg_index] = neutral_pose[3] + rot_sign * rotation / 3
 
-        if flag == 0 or flag % 3 == 0:
-            update_legs(self.quad1, +1, +1)
-            update_legs(self.quad2, -1, -1)
-            if flag == 0:
-                update_legs(self.quad3, -1, -1)
-        elif (flag - 1) % 3 == 0:
-            update_legs(self.quad2, +1, +1)
-            update_legs(self.quad3, -1, -1)
-        else:
-            update_legs(self.quad3, +1, +1)
-            update_legs(self.quad1, -1, -1)
+    #     if flag == 0 or flag % 3 == 0:
+    #         update_legs(self.quad1, +1, +1)
+    #         update_legs(self.quad2, -1, -1)
+    #         if flag == 0:
+    #             update_legs(self.quad3, -1, -1)
+    #     elif (flag - 1) % 3 == 0:
+    #         update_legs(self.quad2, +1, +1)
+    #         update_legs(self.quad3, -1, -1)
+    #     else:
+    #         update_legs(self.quad3, +1, +1)
+    #         update_legs(self.quad1, -1, -1)
 
-        end_pose = np.vstack((end_pos, end_ang))
-        return end_pose
+    #     end_pose = np.vstack((end_pos, end_ang))
+    #     return end_pose
 
 
     def pose2pos(self, pose, leg_index): 
@@ -133,7 +133,7 @@ class TrajPlanner:
         :param leg_index: int, index of leg
         :return pos: position of leg (xyz)
         '''
-        pos = rot(pos=self.eePos[:,leg_index]+pose[:3], angle=pose[3], pivot=pose[:3])
+        pos = rotz(pos=self.eePos[:,leg_index]+pose[:3], angle=pose[3], pivot=pose[:3])
         return pos
 
     def _compute_traj(self, init_pose, end_pose, curve_type, leg_index, timestep): # pose of single leg

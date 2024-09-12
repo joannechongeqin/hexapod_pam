@@ -208,7 +208,7 @@ class HexapodKinematics(object):
 
         index_min = np.argmin(legtorques)
 
-        if (legtorques[0] + legtorques[3] + legtorques [4]) < (legtorques[1] + legtorques[2] + legtorques [5]):
+        if (legtorques[0] + legtorques[3] + legtorques[4]) < (legtorques[1] + legtorques[2] + legtorques[5]):
             return [0,3,4]
         else:
             return [1,2,5]
