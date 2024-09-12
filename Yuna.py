@@ -1,9 +1,8 @@
 from Yuna_TrajPlanner import TrajPlanner
 from Yuna_Env import YunaEnv
 import numpy as np
-from functions import trans
+from functions import trans, solveFK, rotx
 import time
-from functions import solveFK
 
 class Yuna:
     def __init__(self, visualiser=True, camerafollow=True, real_robot_control=False, pybullet_on=True):
@@ -110,52 +109,43 @@ class Yuna:
         if self.is_moving:
             self.step(step_len=0,rotation=0)
             self.is_moving = False
-    def raise_leg(self, leg_index, dz=0.1):
-        '''
-        Raise a specific leg by dz
-        '''
-        self.move_leg(leg_index, 0, 0, dz)
-        
-               
-    def move_leg(self, leg_index, dx, dy, dz):
-        '''
-        Move a specific leg to a new position by dx, dy, dz
-        '''
-        # get current position, make a copy for new position
-        initial_pos = self._get_current_pos()
-        new_pos = np.copy(initial_pos)
-        
-        # update position for the specified leg
-        new_pos[:, leg_index] += np.array([dx, dy, dz])
-        
-        # plan and execute trajectory
-        waypoints = [initial_pos, new_pos]
-        traj = self.trajplanner.general_traj(waypoints)
-        # print(traj.shape, traj)
-        for traj_point in traj:
-            self.env.step(traj_point)
-        
-        # update current pose end-effector position
-        self.current_pose[:, leg_index] += [dx, dy, dz, 0]
-        
-    def move_legs(self, move_by_pos):
-        '''
-        Move multiple legs at the same time
-        move_by_pos: 3x6 array, each column is the dx dy dz of each leg
-        '''
-        # get current position, make a copy for new position
-        initial_pos = self._get_current_pos()
-        new_pos = np.copy(initial_pos) + move_by_pos
-        
-        # plan and execute trajectory
-        waypoints = [initial_pos, new_pos]
-        traj = self.trajplanner.general_traj(waypoints)
-        # print(traj.shape, traj)
-        for traj_point in traj:
-            self.env.step(traj_point)
             
-         # update current pose end-effector position
-        self.current_pose += np.vstack((move_by_pos, np.zeros((1, 6))))
+
+    def move_legs(self, move_by_pos_arr):
+        '''
+        move_by_pos_arr: an array of 3x6 arrays (move_by_pos), each column of move_by_pos is the dx dy dz of each leg
+        :return: None
+        '''
+        pos = self.env.get_leg_pos().copy()
+        waypoints = [pos]
+
+        for move_by_pos in move_by_pos_arr:
+            pos = pos.copy() + move_by_pos
+            waypoints.append(pos)
+        
+        # plan and execute trajectory
+        traj = self.trajplanner.general_traj(waypoints, total_time=3)
+        print(traj.shape, traj)
+        for traj_point in traj:
+            self.env.step(traj_point)
+        # update eePos?
+    
+    def rotx_body(self, angle):
+        '''
+        angle: rotation angle in degrees
+        to rotate robot body by angle is equals to rotate robot legs by -angle wrt base
+        '''
+        angle_rad = np.deg2rad(-angle)
+        body_pos, body_orn = self.env.get_body_pose()
+        legs_pos = self.env.get_leg_pos().copy()
+        print(body_pos, body_orn, legs_pos)
+        new_leg_pos = np.zeros((3, 6))
+        for leg_index in range(6):
+            leg_pos = legs_pos[:, leg_index]
+            new_pos = rotx(pos=leg_pos, angle=-angle_rad, pivot=body_pos)
+            new_leg_pos[:, leg_index] = new_pos
+        move_by_pos = new_leg_pos - legs_pos
+        self.move_legs([move_by_pos])
         
   
     def disconnect(self):

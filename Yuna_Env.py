@@ -5,7 +5,7 @@ import os, sys
 import time
 import robot_setup
 from robot_setup.yunaKinematics import *
-from functions import hebi2bullet, bullet2hebi, solveIK
+from functions import hebi2bullet, bullet2hebi, solveIK, solveFK
 
 class YunaEnv:
     def __init__(self, real_robot_control=True, pybullet_on=True, visualiser=True, camerafollow=True):
@@ -119,7 +119,7 @@ class YunaEnv:
             self.physicsClient = p.connect(p.DIRECT)
         # physical parameters
         self.gravity = -9.81
-        self.friction = 0.7
+        self.friction = 0.8
         # load ground
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         self.groundID = p.loadURDF('plane.urdf')
@@ -132,18 +132,17 @@ class YunaEnv:
         self.YunaID = p.loadURDF(Yuna_file_path, Yuna_init_pos, Yuna_init_orn)
         self.joint_num = p.getNumJoints(self.YunaID) # 41
         self.actuator = [i for i in range(self.joint_num) if p.getJointInfo(self.YunaID,i)[2] != p.JOINT_FIXED] # 18 DOF
-        # load wall
-        wall_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=[1, 0.05, 0.5])
-        wall_position = [0, 1, 0.5]
-        wall_orientation = [0, 0, 0, 1] 
-        self.wallID = p.createMultiBody(baseMass=0, baseCollisionShapeIndex=wall_shape, basePosition=wall_position, baseOrientation=wall_orientation)
-        p.changeDynamics(self.wallID, -1, lateralFriction=self.friction)
-        
+
         if self.visualiser:
             self._add_reference_line()
             self._cam_follow()
             p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1)
             
+    def load_wall(self, wall_size=[1, 0.03, 0.5], wall_position = [0, .6, 0.5], wall_orientation = [0, 0, 0, 1.0]):
+        wall_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=wall_size)
+        self.wallID = p.createMultiBody(baseMass=0, baseCollisionShapeIndex=wall_shape, basePosition=wall_position, baseOrientation=wall_orientation)
+        p.changeDynamics(self.wallID, -1, lateralFriction=self.friction)
+        
     def _init_robot(self):
         '''
         Initialise the robot to the neutral position in the pybullet simulation
@@ -157,20 +156,21 @@ class YunaEnv:
         init_pos = self.eePos.copy()
         self.step(init_pos, iteration=65, sleep='auto')
   
+    def get_body_pose(self):
+        '''
+        Get the position and orientation of the robot in the pybullet simulation
+        :return pos: position of the robot in world frame
+        :return orn: orientation of the robot in world frame in Euler angles
+        '''
+        pos, orn = p.getBasePositionAndOrientation(self.YunaID)
+        return pos, p.getEulerFromQuaternion(orn)
+    
     def _cam_follow(self):
         '''
         Follow the robot with the camera in the pybullet simulation
         :return: None
         '''
-        def _get_body_pose(self):
-            '''
-            Get the position and orientation of the robot in the pybullet simulation
-            :return pos: position of the robot in world frame
-            :return orn: orientation of the robot in world frame in Euler angles
-            '''
-            pos, orn = p.getBasePositionAndOrientation(self.YunaID)
-            return pos, p.getEulerFromQuaternion(orn)
-        cam_pos, cam_orn = _get_body_pose(self)
+        cam_pos, cam_orn = self.get_body_pose()
         # p.resetDebugVisualizerCamera(cameraDistance=2, cameraYaw=np.rad2deg(cam_orn[2])-90, cameraPitch=-35, cameraTargetPosition=cam_pos)#
         p.resetDebugVisualizerCamera(cameraDistance=2, cameraYaw=-90, cameraPitch=-35, cameraTargetPosition=cam_pos)
 
@@ -181,13 +181,14 @@ class YunaEnv:
         '''
         p.addUserDebugLine(lineFromXYZ=[-100,-100,0], lineToXYZ=[100,100,0], lineColorRGB=[0.5,0,0], lineWidth=1)
         p.addUserDebugLine(lineFromXYZ=[-100,100,0], lineToXYZ=[100,-100,0], lineColorRGB=[0.5,0,0], lineWidth=1)
-        p.addUserDebugLine(lineFromXYZ=[-100,-173.2,0], lineToXYZ=[100,173.2,0], lineColorRGB=[0,0,0.5], lineWidth=1)
-        p.addUserDebugLine(lineFromXYZ=[-100,173.2,0], lineToXYZ=[100,-173.2,0], lineColorRGB=[0,0,0.5], lineWidth=1)
-        p.addUserDebugLine(lineFromXYZ=[-173.2,-100,0], lineToXYZ=[173.2,100,0], lineColorRGB=[0,0,0.5], lineWidth=1)
-        p.addUserDebugLine(lineFromXYZ=[-173.2,100,0], lineToXYZ=[173.2,-100,0], lineColorRGB=[0,0,0.5], lineWidth=1)
+        # p.addUserDebugLine(lineFromXYZ=[-100,-173.2,0], lineToXYZ=[100,173.2,0], lineColorRGB=[0,0,0.5], lineWidth=1)
+        # p.addUserDebugLine(lineFromXYZ=[-100,173.2,0], lineToXYZ=[100,-173.2,0], lineColorRGB=[0,0,0.5], lineWidth=1)
+        # p.addUserDebugLine(lineFromXYZ=[-173.2,-100,0], lineToXYZ=[173.2,100,0], lineColorRGB=[0,0,0.5], lineWidth=1)
+        # p.addUserDebugLine(lineFromXYZ=[-173.2,100,0], lineToXYZ=[173.2,-100,0], lineColorRGB=[0,0,0.5], lineWidth=1)
         p.addUserDebugLine(lineFromXYZ=[-100,0,0], lineToXYZ=[100,0,0], lineColorRGB=[0,0,0], lineWidth=1)
         p.addUserDebugLine(lineFromXYZ=[0,-100,0], lineToXYZ=[0,100,0], lineColorRGB=[0,0,0], lineWidth=1)
-    
+        p.addUserDebugLine(lineFromXYZ=[0,-100,0.15], lineToXYZ=[0,100,0.15], lineColorRGB=[1,0,1], lineWidth=1)
+                
     def get_robot_config(self):
         '''
         Get the robot joint configuration
@@ -200,6 +201,15 @@ class YunaEnv:
 
         return robot_config
 
+    def get_leg_pos(self):
+        '''
+        Get the robot's leg xyz pos wrt to body(?) frame
+        return leg_pos: leg positions 3x6 
+        '''
+        joint_hebi = self.get_robot_config()
+        leg_pos = solveFK(joint_hebi)
+        return leg_pos
+    
 if __name__=='__main__':
     # test code
     yunaenv = YunaEnv(real_robot_control=0)
