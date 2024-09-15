@@ -56,7 +56,8 @@ class YunaEnv:
                     bodyIndex=self.YunaID, 
                     jointIndices=self.actuator, 
                     controlMode=p.POSITION_CONTROL, 
-                    targetPositions=jointspace_command2bullet)
+                    targetPositions=jointspace_command2bullet,
+                    forces=self.forces)
                 p.stepSimulation()
                 if self.camerafollow:
                     self._cam_follow()
@@ -119,7 +120,7 @@ class YunaEnv:
             self.physicsClient = p.connect(p.DIRECT)
         # physical parameters
         self.gravity = -9.81
-        self.friction = 0.8
+        self.friction = 2
         # load ground
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         self.groundID = p.loadURDF('plane.urdf')
@@ -132,6 +133,7 @@ class YunaEnv:
         self.YunaID = p.loadURDF(Yuna_file_path, Yuna_init_pos, Yuna_init_orn)
         self.joint_num = p.getNumJoints(self.YunaID) # 41
         self.actuator = [i for i in range(self.joint_num) if p.getJointInfo(self.YunaID,i)[2] != p.JOINT_FIXED] # 18 DOF
+        self.forces = [38 if "shoulder" in p.getJointInfo(self.YunaID, joint)[1].decode('utf-8') else 20 for joint in self.actuator]
 
         if self.visualiser:
             self._add_reference_line()
@@ -165,6 +167,17 @@ class YunaEnv:
         pos, orn = p.getBasePositionAndOrientation(self.YunaID)
         return pos, p.getEulerFromQuaternion(orn)
     
+    def get_body_matrix(self):
+        '''
+        Get homogeneous transformation matrix of body frame
+        '''
+        pos, orn = p.getBasePositionAndOrientation(self.YunaID)
+        rot_mat = np.array(p.getMatrixFromQuaternion(orn)).reshape(3, 3)
+        body_mat = np.eye(4)
+        body_mat[:3, :3] = rot_mat
+        body_mat[:3, 3] = pos
+        return body_mat
+    
     def _cam_follow(self):
         '''
         Follow the robot with the camera in the pybullet simulation
@@ -187,7 +200,9 @@ class YunaEnv:
         # p.addUserDebugLine(lineFromXYZ=[-173.2,100,0], lineToXYZ=[173.2,-100,0], lineColorRGB=[0,0,0.5], lineWidth=1)
         p.addUserDebugLine(lineFromXYZ=[-100,0,0], lineToXYZ=[100,0,0], lineColorRGB=[0,0,0], lineWidth=1)
         p.addUserDebugLine(lineFromXYZ=[0,-100,0], lineToXYZ=[0,100,0], lineColorRGB=[0,0,0], lineWidth=1)
-        p.addUserDebugLine(lineFromXYZ=[0,-100,0.15], lineToXYZ=[0,100,0.15], lineColorRGB=[1,0,1], lineWidth=1)
+        
+    def add_y_ref_line_at_height(self, height, lineColorRGB=[1,0,1]):
+        p.addUserDebugLine(lineFromXYZ=[0,-100,height], lineToXYZ=[0,100,height], lineColorRGB=lineColorRGB, lineWidth=1)
                 
     def get_robot_config(self):
         '''
@@ -203,7 +218,7 @@ class YunaEnv:
 
     def get_leg_pos(self):
         '''
-        Get the robot's leg xyz pos wrt to body(?) frame
+        Get the robot's leg xyz pos wrt to body frame
         return leg_pos: leg positions 3x6 
         '''
         joint_hebi = self.get_robot_config()
