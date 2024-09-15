@@ -1,6 +1,6 @@
 import numpy as np
 import hebi
-from functions import solveIK, rotz, trans
+from functions import solveIK, rotz, transxy
 # default robot leg end-effecter position w.r.t body frame
 eePos = np.array([[0.51589,    0.51589,   0.0575,     0.0575,     -0.45839,   -0.45839],
                   [0.23145,   -0.23145,   0.5125,     -0.5125,    0.33105,    -0.33105],
@@ -62,18 +62,18 @@ class TrajPlanner:
         if flag % 2 == 0: # swing tripod1 forward
             for leg_index in self.tripod1:
                 # moves tripod1 forward relative to the body
-                end_pos[:, leg_index] = np.reshape(trans(neutral_pose[:3], +step_len/2, course), (3,)) # compute the end position by translate +step_len/2 from the neutral_pose by in the direction specified by course
+                end_pos[:, leg_index] = np.reshape(transxy(neutral_pose[:3], +step_len/2, course), (3,)) # compute the end position by translate +step_len/2 from the neutral_pose by in the direction specified by course
                 end_ang[leg_index] = neutral_pose[3] + rotation / 2 # compute the end orientation
             for leg_index in self.tripod2:
                 # moves tripod2 backward relative to the body
-                end_pos[:, leg_index] = np.reshape(trans(neutral_pose[:3], -step_len/2, course), (3,))
+                end_pos[:, leg_index] = np.reshape(transxy(neutral_pose[:3], -step_len/2, course), (3,))
                 end_ang[leg_index] = neutral_pose[3] - rotation / 2
         else: # swing tripod2 forward
             for leg_index in self.tripod1:
-                end_pos[:, leg_index] = np.reshape(trans(neutral_pose[:3], -step_len/2, course), (3,))
+                end_pos[:, leg_index] = np.reshape(transxy(neutral_pose[:3], -step_len/2, course), (3,))
                 end_ang[leg_index] = neutral_pose[3] - rotation / 2
             for leg_index in self.tripod2:
-                end_pos[:, leg_index] = np.reshape(trans(neutral_pose[:3], +step_len/2, course), (3,))
+                end_pos[:, leg_index] = np.reshape(transxy(neutral_pose[:3], +step_len/2, course), (3,))
                 end_ang[leg_index] = neutral_pose[3] + rotation / 2
         
         end_pose = np.vstack((end_pos, end_ang))
@@ -107,7 +107,7 @@ class TrajPlanner:
         
     #     def update_legs(legs, step_sign, rot_sign):
     #         for leg_index in legs:
-    #             end_pos[:, leg_index] = np.reshape(trans(neutral_pose[:3], step_sign * step_len / 3, course), (3,))
+    #             end_pos[:, leg_index] = np.reshape(transxy(neutral_pose[:3], step_sign * step_len / 3, course), (3,))
     #             end_ang[leg_index] = neutral_pose[3] + rot_sign * rotation / 3
 
     #     if flag == 0 or flag % 3 == 0:

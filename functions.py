@@ -1,19 +1,6 @@
 import numpy as np
 from robot_setup.yunaKinematics import HexapodKinematics
 
-def rotz(pos, angle, pivot=np.array([0,0,0])):
-    '''
-    Calculate the rotated position of a point around z-axis where a pivot point lies
-    :param pos: the position of the point to be rotated
-    :param angle: the angle of rotation in radians, counterclockwise is positive
-    :param pivot: the centre of rotation, only (x, y) is effective
-    :return: the rotated position
-    '''
-    c, s = np.cos(angle), np.sin(angle)
-    rot_z = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
-    pos_ = np.matmul(rot_z, pos - pivot)
-    return pos_ + pivot
-
 def rotx(pos, angle, pivot=np.array([0,0,0])):
     '''
     Calculate the rotated position of a point around x-axis where a pivot point lies
@@ -27,8 +14,35 @@ def rotx(pos, angle, pivot=np.array([0,0,0])):
     pos_ = np.matmul(rot_x, pos - pivot)
     return pos_ + pivot
 
-def trans(pos, distance, angle):
+def roty(pos, angle, pivot=np.array([0,0,0])):
     '''
+    Calculate the rotated position of a point around y-axis where a pivot point lies
+    :param pos: the position of the point to be rotated
+    :param angle: the angle of rotation in radians, counterclockwise is positive
+    :param pivot: the centre of rotation, only (x, z) is effective
+    :return: the rotated position
+    '''
+    c, s = np.cos(angle), np.sin(angle)
+    rot_y = np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
+    pos_ = np.matmul(rot_y, pos - pivot)
+    return pos_ + pivot
+
+def rotz(pos, angle, pivot=np.array([0,0,0])):
+    '''
+    Calculate the rotated position of a point around z-axis where a pivot point lies
+    :param pos: the position of the point to be rotated
+    :param angle: the angle of rotation in radians, counterclockwise is positive
+    :param pivot: the centre of rotation, only (x, y) is effective
+    :return: the rotated position
+    '''
+    c, s = np.cos(angle), np.sin(angle)
+    rot_z = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
+    pos_ = np.matmul(rot_z, pos - pivot)
+    return pos_ + pivot
+
+def transxy(pos, distance, angle):
+    '''
+    IN XY PLANE
     Calculate the translated position of a point in a direction
     :param pos: the position of the point to be translated
     :param distance: the distance of translation
