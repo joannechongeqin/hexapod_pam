@@ -1,7 +1,7 @@
 from Yuna_TrajPlanner import TrajPlanner
 from Yuna_Env import YunaEnv
 import numpy as np
-from functions import trans, solveFK, rotx
+from functions import transxy, solveFK, rotx
 import time
 
 class Yuna:
@@ -109,44 +109,100 @@ class Yuna:
         if self.is_moving:
             self.step(step_len=0,rotation=0)
             self.is_moving = False
-            
-
-    def move_legs(self, move_by_pos_arr):
+    
+    def move_legs_to_pos_in_body_frame(self, target_pos_arr):
         '''
-        move_by_pos_arr: an array of 3x6 arrays (move_by_pos), each column of move_by_pos is the dx dy dz of each leg
-        :return: None
+        target_pos_arr: an array of 3x6 arrays of target leg positions wrt BODY frame
         '''
-        pos = self.env.get_leg_pos().copy()
-        waypoints = [pos]
-
-        for move_by_pos in move_by_pos_arr:
-            pos = pos.copy() + move_by_pos
-            waypoints.append(pos)
+        pos_b0 = self.env.get_leg_pos().copy() # initial leg pos in body frame
+        waypoints = [pos_b0] + target_pos_arr
         
         # plan and execute trajectory
-        traj = self.trajplanner.general_traj(waypoints, total_time=3)
-        print(traj.shape, traj)
+        traj = self.trajplanner.general_traj(waypoints, total_time=5)
         for traj_point in traj:
             self.env.step(traj_point)
-        # update eePos?
     
-    def rotx_body(self, angle):
+    def move_legs_to_pos_in_world_frame(self, target_pos_arr):
+        '''
+        target_pos_arr: an array of 3x6 arrays of target leg positions wrt WORLD frame
+        '''
+        WTB = self.env.get_body_matrix() # body frame wrt world
+        BTW = np.linalg.inv(WTB)
+        target_pos_body = [np.dot(BTW, np.vstack((pos, np.ones((1, 6)))))[0:3, :] for pos in target_pos_arr] # BpE = BTW * WpE
+        self.move_legs_to_pos_in_body_frame(target_pos_body)
+        
+    def move_legs_by_pos_in_body_frame(self, move_by_pos_arr):
+        '''
+        move_by_pos_arr: an array of 3x6 arrays (move_by_pos), each column of move_by_pos is the dx dy dz of each leg wrt BODY frame
+        '''
+        pos_b = self.env.get_leg_pos().copy() # leg pos in body frame
+        target_pos_arr = []
+        for move_by_pos in move_by_pos_arr:
+            pos_b += move_by_pos
+            target_pos_arr.append(pos_b.copy())
+        self.move_legs_to_pos_in_body_frame(target_pos_arr)
+    
+    def move_legs_by_pos_in_world_frame(self, move_by_pos_arr):
+        '''
+        move_by_pos_arr: an array of 3x6 arrays (move_by_pos), each column of move_by_pos is the dx dy dz of each leg wrt WORLD frame
+        '''
+        pos_b = self.env.get_leg_pos().copy() # leg pos in body frame
+        WTB = self.env.get_body_matrix() # body frame wrt world
+        BTW = np.linalg.inv(WTB)
+        pos_w = np.dot(WTB, np.vstack((pos_b, np.ones((1, 6)))))[0:3, :] # leg pos in world frame
+        target_pos_arr = []
+        for move_by_pos in move_by_pos_arr:
+            pos_w += move_by_pos
+            target_pos_arr.append(pos_w.copy())
+        self.move_legs_to_pos_in_world_frame(target_pos_arr)
+        
+    def rotx_body(self, angle, move=False):
         '''
         angle: rotation angle in degrees
-        to rotate robot body by angle is equals to rotate robot legs by -angle wrt base
+        return: final leg pos wrt body frame to achieve the body rotation
         '''
-        angle_rad = np.deg2rad(-angle)
-        body_pos, body_orn = self.env.get_body_pose()
-        legs_pos = self.env.get_leg_pos().copy()
-        print(body_pos, body_orn, legs_pos)
-        new_leg_pos = np.zeros((3, 6))
-        for leg_index in range(6):
-            leg_pos = legs_pos[:, leg_index]
-            new_pos = rotx(pos=leg_pos, angle=-angle_rad, pivot=body_pos)
-            new_leg_pos[:, leg_index] = new_pos
-        move_by_pos = new_leg_pos - legs_pos
-        self.move_legs([move_by_pos])
+        WTB0 = self.env.get_body_matrix() # initial body frame wrt world
+        pos_b0 = self.env.get_leg_pos().copy() # initial leg pos in body frame
+        pos_w0 = np.dot(WTB0, np.vstack((pos_b0, np.ones((1, 6)))))[0:3, :] # initial leg pos in world frame
+        # print("initial leg pos wrt body frame: \n", pos_b0)
+        # print("initial body frame wrt world: \n", WTB0)
+        # print("initial leg pos wrt world frame: \n", pos_w0)
         
+        angle = np.deg2rad(angle)
+        c, s = np.cos(angle), np.sin(angle)
+        rot_x = np.array([[1, 0, 0, 0], [0, c, -s, 0], [0, s, c, 0], [0, 0, 0, 1]])
+        WTB1 = np.dot(WTB0, rot_x) # final body frame wrt world after rotation
+        # initial and final pos in world frame should be the same --> find final pos in body frame
+        pos_b1 = np.dot(np.linalg.inv(WTB1), np.vstack((pos_w0, np.ones((1, 6)))))[0:3, :] # final leg pos in body frame
+        # print("final body frame wrt world: \n", WTB1)
+        # print("final leg pos wrt body frame: \n", pos_b1)
+        # print("final leg pos wrt world frame: \n", np.dot(WTB1, np.vstack((pos_b1, np.ones((1, 6)))))[0:3, :])
+        
+        # # debug check (compare with actual)
+        # final_actual_pos = self.env.get_leg_pos().copy()
+        # final_actual_WTB = self.env.get_body_matrix()
+        # print("final actual leg pos wrt body frame: \n", final_actual_pos)
+        # print("final actual body frame wrt world: \n", final_actual_WTB)
+        # print("final actual leg pos wrt world frame: \n", np.dot(final_actual_WTB, np.vstack((final_actual_pos, np.ones((1, 6)))))[0:3, :])
+        
+        if move:
+            self.move_legs_to_pos_in_body_frame([pos_b1])
+        return pos_b1
+        
+    def trans_body(self, dx, dy, dz, move=False):
+        move_by_pos_arr = np.array([[-dx] * 6, [-dy] * 6, [-dz] * 6])  
+        if move:       
+            self.move_legs_by_pos_in_body_frame([move_by_pos_arr])
+        return move_by_pos_arr
+    
+    def rotx_trans_body(self, angle, dx, dy, dz, move=False):
+        pos_b0 = self.env.get_leg_pos().copy() # initial leg pos in body frame
+        pos_b1 = self.rotx_body(angle) # target pos after rotation in body frame
+        move_by_pos_arr = (pos_b1 - pos_b0) + self.trans_body(dx, dy, dz, move=False)
+        if move:
+            self.move_legs_by_pos_in_body_frame([move_by_pos_arr])
+        return move_by_pos_arr
+    
   
     def disconnect(self):
         '''
@@ -202,8 +258,8 @@ class Yuna:
         rho = 0.05 # soft copy rate (A smaller rho value smoother transitions, a larger value more immediate transitions)
         if self.smoothing:
             # calculate diff in position
-            _pos = trans((0.,0.), self._step_len, self._course)
-            cmd_pos = trans((0.,0.), self.cmd_step_len, self.cmd_course)
+            _pos = transxy((0.,0.), self._step_len, self._course)
+            cmd_pos = transxy((0.,0.), self.cmd_step_len, self.cmd_course)
             dpos = np.linalg.norm(cmd_pos - _pos)
             
             # calculate diff in rotation
