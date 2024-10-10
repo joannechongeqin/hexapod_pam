@@ -5,7 +5,7 @@ from functions import transxy, solveFK, rotx
 import time
 
 class Yuna:
-    def __init__(self, visualiser=True, camerafollow=True, real_robot_control=False, pybullet_on=True):
+    def __init__(self, visualiser=True, camerafollow=True, real_robot_control=False, pybullet_on=True, show_ref_points=False):
         # initialise the environment
         self.env = YunaEnv(visualiser=visualiser, camerafollow=camerafollow, real_robot_control=real_robot_control, pybullet_on=pybullet_on)
         self.eePos = self.env.eePos.copy() # robot leg end-effecter position w.r.t body frame
@@ -36,6 +36,7 @@ class Yuna:
         self.flag = 0 # a flag to record how many steps achieved
         self.is_moving = False # Ture for moving and False for static
         self.smoothing = True # Set to True to enable step smoothing
+        self.show_ref_points = show_ref_points # Set to True to show trajectory of legs by plotting reference point in the environment
 
     def step(self, *args, **kwargs):
         '''
@@ -118,9 +119,16 @@ class Yuna:
         waypoints = [pos_b0] + target_pos_arr
         
         # plan and execute trajectory
-        traj = self.trajplanner.general_traj(waypoints, total_time=5)
+        traj = self.trajplanner.general_traj(waypoints, total_time=len(waypoints) * 0.8)
+        counter = 0
         for traj_point in traj:
             self.env.step(traj_point)
+            # debug visualization
+            if self.show_ref_points and counter % 10 == 0:
+                self.env.add_ref_points_wrt_body_frame(traj_point)
+                self.env.add_body_frame_ref_point()
+            counter += 1
+        print("num of traj points: ", counter) 
     
     def move_legs_to_pos_in_world_frame(self, target_pos_arr):
         '''
@@ -156,7 +164,7 @@ class Yuna:
             target_pos_arr.append(pos_w.copy())
         self.move_legs_to_pos_in_world_frame(target_pos_arr)
         
-    def rotx_body(self, angle, move=False):
+    def rotx_body(self, angle, num_of_waypoints=2, move=False):
         '''
         angle: rotation angle in degrees
         return: final leg pos wrt body frame to achieve the body rotation
@@ -168,15 +176,19 @@ class Yuna:
         # print("initial body frame wrt world: \n", WTB0)
         # print("initial leg pos wrt world frame: \n", pos_w0)
         
-        angle = np.deg2rad(angle)
-        c, s = np.cos(angle), np.sin(angle)
-        rot_x = np.array([[1, 0, 0, 0], [0, c, -s, 0], [0, s, c, 0], [0, 0, 0, 1]])
-        WTB1 = np.dot(WTB0, rot_x) # final body frame wrt world after rotation
-        # initial and final pos in world frame should be the same --> find final pos in body frame
-        pos_b1 = np.dot(np.linalg.inv(WTB1), np.vstack((pos_w0, np.ones((1, 6)))))[0:3, :] # final leg pos in body frame
-        # print("final body frame wrt world: \n", WTB1)
-        # print("final leg pos wrt body frame: \n", pos_b1)
-        # print("final leg pos wrt world frame: \n", np.dot(WTB1, np.vstack((pos_b1, np.ones((1, 6)))))[0:3, :])
+        target_pos_arr = []
+        interval = angle / num_of_waypoints
+        for i in range(1, num_of_waypoints+1):
+            angle = np.deg2rad(interval*i)
+            c, s = np.cos(angle), np.sin(angle)
+            rot_x = np.array([[1, 0, 0, 0], [0, c, -s, 0], [0, s, c, 0], [0, 0, 0, 1]])
+            WTB1 = np.dot(WTB0, rot_x) # final body frame wrt world after rotation
+            # initial and final pos in world frame should be the same --> find final pos in body frame
+            pos_b1 = np.dot(np.linalg.inv(WTB1), np.vstack((pos_w0, np.ones((1, 6)))))[0:3, :] # final leg pos in body frame
+            # print("final body frame wrt world: \n", WTB1)
+            # print("final leg pos wrt body frame: \n", pos_b1)
+            # print("final leg pos wrt world frame: \n", np.dot(WTB1, np.vstack((pos_b1, np.ones((1, 6)))))[0:3, :])
+            target_pos_arr.append(pos_b1.copy())
         
         # # debug check (compare with actual)
         # final_actual_pos = self.env.get_leg_pos().copy()
@@ -186,15 +198,21 @@ class Yuna:
         # print("final actual leg pos wrt world frame: \n", np.dot(final_actual_WTB, np.vstack((final_actual_pos, np.ones((1, 6)))))[0:3, :])
         
         if move:
-            self.move_legs_to_pos_in_body_frame([pos_b1])
+            self.move_legs_to_pos_in_body_frame(target_pos_arr)
         return pos_b1
-        
+    
     def trans_body(self, dx, dy, dz, move=False):
         move_by_pos_arr = np.array([[-dx] * 6, [-dy] * 6, [-dz] * 6])  
         if move:       
             self.move_legs_by_pos_in_body_frame([move_by_pos_arr])
         return move_by_pos_arr
     
+    def trans_body_in_world_frame(self, dx, dy, dz, move=False):
+        move_by_pos_arr = np.array([[-dx] * 6, [-dy] * 6, [-dz] * 6])
+        if move:
+            self.move_legs_by_pos_in_world_frame([move_by_pos_arr])
+        # return
+
     def rotx_trans_body(self, angle, dx, dy, dz, move=False):
         pos_b0 = self.env.get_leg_pos().copy() # initial leg pos in body frame
         pos_b1 = self.rotx_body(angle) # target pos after rotation in body frame
@@ -203,7 +221,42 @@ class Yuna:
             self.move_legs_by_pos_in_body_frame([move_by_pos_arr])
         return move_by_pos_arr
     
-  
+    def wall_transition_step_ground_leg(self, step_len, leg4_step_half=False, raise_h=0.05):
+        '''
+        assuming stepping sideway to left, ground legs are at the right side
+        '''
+        for leg_index in [1, 3, 5]:
+            if leg4_step_half and leg_index == 3:
+                final_step_len = step_len / 2
+            else:
+                final_step_len = step_len
+            raise_leg = np.zeros((3,6))
+            raise_leg[:, leg_index] = [0, final_step_len/2, raise_h]
+            step_leg = np.zeros((3,6))
+            step_leg[:, leg_index] = [0, final_step_len/2, -raise_h]
+            self.move_legs_by_pos_in_world_frame([raise_leg, step_leg])
+    
+    def wall_transition_first_step_wall_leg(self, step_height, wall_dist):
+        '''
+        :param step_height: The height of the first step
+        :param wall_dist: The distance of the first step to the wall [leg1, leg3, leg5]
+        assuming stepping sideway to left, wall legs are at the left side
+        '''
+        for leg_index in [0, 2, 4]:
+            raise_leg = np.zeros((3,6))
+            raise_leg[:, leg_index] = [0, 0, step_height]
+            step_leg = np.zeros((3,6))
+            step_leg[:, leg_index] = [0, wall_dist, 0]
+            self.move_legs_by_pos_in_world_frame([raise_leg, step_leg])
+    
+    def wall_transition_step_wall_leg(self, step_len, clearance=0.06):
+        for leg_index in [0, 2, 4]:
+            raise_leg = np.zeros((3,6))
+            raise_leg[:, leg_index] = [0, -clearance/2, step_len/2]
+            step_leg = np.zeros((3,6))
+            step_leg[:, leg_index] = [0, +clearance/2, step_len/2]
+            self.move_legs_by_pos_in_world_frame([raise_leg, step_leg])
+
     def disconnect(self):
         '''
         Disable real robot motors, disconnect from pybullet environment and exit the programme
