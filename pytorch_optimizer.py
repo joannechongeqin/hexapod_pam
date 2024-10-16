@@ -23,6 +23,16 @@ th_0 = torch.tensor([0, 0, -PI / 2,
 
     
 def get_transformation(theta, batch_size=batch_size):
+    """
+    Computes the transformation matrices for each leg based on the given joint angles.
+    
+    :params torch.Tensor theta: The joint angles of all legs. Shape: [batch_size, 18].
+    :params int, optional batch_size: The number of samples processed at a time during a pass. 
+    
+    :return: base_trans, leg_trans
+    - base_trans (torch.Tensor): Transformation matrix of the body/base. Shape: [batch_size, 4, 4].
+    - leg_trans (torch.Tensor): Transformation matrices of each leg. Shape: [batch_size, NUM_Legs, num_of_links_per_leg, 4, 4].
+    """
     leg_trans = []
     base_trans = []
     
@@ -65,6 +75,18 @@ def get_transformation(theta, batch_size=batch_size):
 
 
 def get_transformations_from_params(params):
+    """
+    Computes the base and leg transformation matrices from the given parameters.
+
+    :param torch.Tensor params: A tensor containing the base position, rotation, and joint angles.
+                                Shape: [batch_size, 21], where the first 3 values are base parameters (x, y, z_rot) 
+                                and the remaining 18 are joint angles. 
+
+    :return: robot_frame_trans, base_trans, leg_trans
+    - robot_frame_trans (torch.Tensor): Transformation matrix of the robot base in the world frame. Shape: [batch_size, 4, 4].
+    - base_trans (torch.Tensor): Base transformation matrix in the world frame. Shape: [batch_size, 4, 4].
+    - leg_trans (torch.Tensor): Leg transformation matrices in the world frame. Shape: [batch_size, NUM_Legs, num_of_links_per_leg, 4, 4].
+    """
     rob_tf = pk.Transform3d(pos=torch.cat([params[:,:2],torch.zeros(batch_size,1)],dim=-1), 
                             rot=torch.cat([torch.zeros(batch_size,2),params[:,2].unsqueeze(-1)],dim=-1))
     robot_frame_trans = rob_tf.get_matrix()
@@ -78,6 +100,17 @@ def get_transformations_from_params(params):
 
 
 def solve_single_leg_ik(goal, leg_idx, batch_size=1):
+    """
+    Solves the inverse kinematics for a single leg, optimizing to reach a specified goal position.
+
+    :param pk.Transform3d goal: The desired position and orientation for the leg end-effector.
+    :param int leg_idx: The index of the leg to be optimized.
+    :param int batch_size: The number of samples processed at a time during a pass.
+
+    :return: optimized_params
+    - optimized_params (torch.Tensor): Shape: [batch_size, 21], where the first 3 values are base parameters (x, y, z_rot) 
+            and the remaining 18 are joint angles. 
+    """
     # generate random initial guess for optimization
     xy = torch.rand(batch_size, 2) # xy base position
     z_rot = torch.rand(batch_size, 1) # z rotation angle of base
@@ -117,6 +150,17 @@ def solve_single_leg_ik(goal, leg_idx, batch_size=1):
     return res.x
 
 def solve_multiple_legs_ik(goal, leg_idxs, batch_size=1):
+    """
+    Solves the inverse kinematics for multiple legs, optimizing to reach specified goal positions.
+
+    :param pk.Transform3d goal: The desired position and orientation for the leg end-effectors. Shape: [len(leg_idxs), 4, 4].
+    :param list leg_idxs: List of leg indices to be optimized.
+    :param int batch_size: The number of samples processed at a time during a pass.
+
+    :return: optimized_params
+    - optimized_params (torch.Tensor): Shape: [batch_size, 21], where the first 3 values are base parameters (x, y, z_rot) 
+            and the remaining 18 are joint angles. 
+    """
     assert goal.get_matrix().shape[0] == len(leg_idxs)
     
     # generate random initial guess for optimization
@@ -148,6 +192,46 @@ def solve_multiple_legs_ik(goal, leg_idxs, batch_size=1):
         max_iter=50,
         disp=2
         )
+    print("result:\n", res.x)
+    print("res.success: ", res.success)
+    return res.x
+
+
+def solve_all_legs_ik(goal, batch_size=1):
+    ''' :param goal: target position for all legs, shape = [NUM_Legs, 4, 4]
+    '''
+    assert goal.get_matrix().shape[0] == NUM_Legs
+    
+    # generate random initial guess for optimization
+    xy = torch.rand(batch_size, 2) # xy base position
+    z_rot = torch.rand(batch_size, 1) # z rotation angle of base
+    theta = th_0 # torch.rand(batch_size, 18) # joint angles
+    params = torch.cat([xy,z_rot,theta], dim=-1)
+    
+    def cost_function(params):
+        rob_tf = pk.Transform3d(pos=torch.cat([params[:,:2],torch.zeros(batch_size,1)],dim=-1), 
+                                    rot=torch.cat([torch.zeros(batch_size,2),params[:,2].unsqueeze(-1)],dim=-1))
+
+        _, leg_trans = get_transformation(params[:,3:])
+        leg_i_eef_trans = leg_trans[:,list(range(6)),-1,:,:]
+        leg_i_eef = torch.einsum("bkl,bilm->bikm",rob_tf.get_matrix(),leg_i_eef_trans)
+        eef_pos = leg_i_eef[:,:,:3,3]
+        
+        # optimize based on distance between eef pos and goal pos
+        residual_squared = (eef_pos - goal.get_matrix()[:,:3,3].unsqueeze(0))**2
+        
+        cost = residual_squared.sum()
+        return cost
+
+    res = minimize(
+        cost_function, 
+        params, 
+        method='l-bfgs', 
+        options=dict(line_search='strong-wolfe'),
+        max_iter=50,
+        disp=2
+        )
+    
     print("result:\n", res.x)
     print("res.success: ", res.success)
     return res.x
@@ -210,12 +294,24 @@ def visualize(base_trans, leg_trans, batch_size=batch_size, goal=None):
 if __name__=='__main__':
     
     ## Visualize initial base and legs pose
-    base_trans0, leg_trans = get_transformation(th_0[0].reshape(1,18), batch_size=1)
-    visualize(base_trans=base_trans0, leg_trans=leg_trans, batch_size=1, goal=None)
+    # base_trans0, leg_trans = get_transformation(th_0[0].reshape(1,18), batch_size=1)
+    # visualize(base_trans=base_trans0, leg_trans=leg_trans, batch_size=1, goal=None)
     
     solve_single_leg = False
+    solve_all_legs = True
     
-    if solve_single_leg:
+    if solve_all_legs:
+        pos = torch.tensor([[0.5, 0.3, 0], 
+                            [0.5, -0.3, 0], 
+                            [0.05, .5, 0],
+                            [0.05, -.5, 0],
+                            [-.45, 0.3, 0],
+                            [-.45, -0.3, 0]])
+        rot = torch.zeros_like(pos)
+        goal = pk.Transform3d(pos=pos, rot=rot)
+        params = solve_all_legs_ik(goal, batch_size=batch_size)    
+    
+    elif solve_single_leg:
         # GOAL: minimize distance of leg 1 to goal
         leg_idx = 0
         pos = torch.tensor([0.3, 0.3, -0.1])
@@ -238,9 +334,9 @@ if __name__=='__main__':
         goal = pk.Transform3d(pos=pos, rot=rot)
         params = solve_multiple_legs_ik(goal, leg_idxs=leg_idxs, batch_size=batch_size)
     
-    for i in range(NUM_Legs): # force all remaining legs (not involved in optimization) to be at initial pos (for temporary debugging, may not the best way to do this)
-        if (solve_single_leg and i != leg_idx) or (not solve_single_leg and i not in leg_idxs):
-            params[:,3+3*i:3+3*(i+1)] = th_0[:,3*i:3*(i+1)]
+    # for i in range(NUM_Legs): # force all remaining legs (not involved in optimization) to be at initial pos (for temporary debugging, may not the best way to do this)
+    #     if (solve_single_leg and i != leg_idx) or (not solve_single_leg and i not in leg_idxs):
+    #         params[:,3+3*i:3+3*(i+1)] = th_0[:,3*i:3*(i+1)]
       
     robot_frame_trans, base_trans, leg_trans = get_transformations_from_params(params)
     visualize(base_trans=base_trans, leg_trans=leg_trans, goal=pos)
