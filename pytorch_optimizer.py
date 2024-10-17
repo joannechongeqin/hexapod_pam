@@ -4,13 +4,14 @@ import torch
 import trimesh
 from matplotlib  import colormaps
 from torchmin import minimize
-import time
+import sys
 import numpy as np
 
 NUM_Legs = 6
 PI = math.pi
 chains = [] # list to store chain for each leg
 batch_size = 2
+np.set_printoptions(precision=3, suppress=True)
 
 # initial [guess] joint angles for robot's legs (all legs on ground, joints at 90 deg)
 # 1x18, each group of 3 values represents joint angles for each leg
@@ -79,18 +80,18 @@ def get_transformations_from_params(params):
     Computes the base and leg transformation matrices from the given parameters.
 
     :param torch.Tensor params: A tensor containing the base position, rotation, and joint angles.
-                                Shape: [batch_size, 21], where the first 3 values are base parameters (x, y, z_rot) 
+                                Shape: [batch_size, 22], where the first 3 values are base parameters (x, y, z, z_rot) 
                                 and the remaining 18 are joint angles. 
 
     :return: robot_frame_trans, base_trans, leg_trans
-    - robot_frame_trans (torch.Tensor): Transformation matrix of the robot base in the world frame. Shape: [batch_size, 4, 4].
+    - robot_frame_trans (torch.Tensor): Transformation matrix of the robot frame in the world frame. Shape: [batch_size, 4, 4].
     - base_trans (torch.Tensor): Base transformation matrix in the world frame. Shape: [batch_size, 4, 4].
     - leg_trans (torch.Tensor): Leg transformation matrices in the world frame. Shape: [batch_size, NUM_Legs, num_of_links_per_leg, 4, 4].
     """
-    rob_tf = pk.Transform3d(pos=torch.cat([params[:,:2],torch.zeros(batch_size,1)],dim=-1), 
-                            rot=torch.cat([torch.zeros(batch_size,2),params[:,2].unsqueeze(-1)],dim=-1))
+    rob_tf = pk.Transform3d(pos=torch.cat([params[:,:3]],dim=-1), 
+                            rot=torch.cat([torch.zeros(batch_size,2),params[:,3].unsqueeze(-1)],dim=-1))
     robot_frame_trans = rob_tf.get_matrix()
-    base_trans, leg_trans = get_transformation(params[:,3:]) # in robot frame
+    base_trans, leg_trans = get_transformation(params[:,4:]) # in robot frame
 
     # transform to world frame
     base_trans = torch.bmm(robot_frame_trans,base_trans)
@@ -112,20 +113,20 @@ def solve_single_leg_ik(goal, leg_idx, batch_size=1):
             and the remaining 18 are joint angles. 
     """
     # generate random initial guess for optimization
-    xy = torch.rand(batch_size, 2) # xy base position
+    xyz = torch.rand(batch_size, 3) # xy base position
     z_rot = torch.rand(batch_size, 1) # z rotation angle of base
     theta = th_0 # torch.rand(batch_size, 18) # joint angles
-    params = torch.cat([xy,z_rot,theta], dim=-1)
+    params = torch.cat([xyz,z_rot,theta], dim=-1)
     
     def cost_function(params):
-        # base_tf = Transform3d(pos=tensor([[x, y, 0]]), rot=tensor([[quaternion (w,x,y,z) of euler angle (0, 0, z_rot)]])) 
+        # base_tf = Transform3d(pos=tensor([[x, y, z]]), rot=tensor([[quaternion (w,x,y,z) of euler angle (0, 0, z_rot)]])) 
         #   torch.cat(..., dim=-1) concatenates input tensors along last dim
         #   .unsqueeze(dim) adds a new dim of size 1 at the specified position (for proper concatenation)
-        rob_tf = pk.Transform3d(pos=torch.cat([params[:,:2],torch.zeros(batch_size,1)],dim=-1), 
-                                    rot=torch.cat([torch.zeros(batch_size,2),params[:,2].unsqueeze(-1)],dim=-1))
+        rob_tf = pk.Transform3d(pos=torch.cat([params[:,:3]],dim=-1), 
+                                    rot=torch.cat([torch.zeros(batch_size,2),params[:,3].unsqueeze(-1)],dim=-1))
         
         # get transformation of target leg's end-effector
-        _,leg_trans = get_transformation(params[:,3:])
+        _,leg_trans = get_transformation(params[:,4:])
         leg_i_eef_trans = leg_trans[:,leg_idx,-1,:,:]
         
         # combine base_tf (guess) with leg's end-effector transformation
@@ -158,22 +159,22 @@ def solve_multiple_legs_ik(goal, leg_idxs, batch_size=1):
     :param int batch_size: The number of samples processed at a time during a pass.
 
     :return: optimized_params
-    - optimized_params (torch.Tensor): Shape: [batch_size, 21], where the first 3 values are base parameters (x, y, z_rot) 
+    - optimized_params (torch.Tensor): Shape: [batch_size, 21], where the first 4 values are base parameters (x, y, z, z_rot) 
             and the remaining 18 are joint angles. 
     """
     assert goal.get_matrix().shape[0] == len(leg_idxs)
     
     # generate random initial guess for optimization
-    xy = torch.rand(batch_size, 2) # xy base position
+    xyz = torch.rand(batch_size, 3) # xyz base position
     z_rot = torch.rand(batch_size, 1) # z rotation angle of base
     theta = th_0 # torch.rand(batch_size, 18) # joint angles
-    params = torch.cat([xy,z_rot,theta], dim=-1)
+    params = torch.cat([xyz,z_rot,theta], dim=-1)
     
     def cost_function(params):
-        rob_tf = pk.Transform3d(pos=torch.cat([params[:,:2],torch.zeros(batch_size,1)],dim=-1), 
-                                    rot=torch.cat([torch.zeros(batch_size,2),params[:,2].unsqueeze(-1)],dim=-1))
+        rob_tf = pk.Transform3d(pos=torch.cat([params[:,:3]],dim=-1), 
+                                    rot=torch.cat([torch.zeros(batch_size,2),params[:,3].unsqueeze(-1)],dim=-1))
 
-        _, leg_trans = get_transformation(params[:,3:])
+        _, leg_trans = get_transformation(params[:,4:])
         leg_i_eef_trans = leg_trans[:,leg_idxs,-1,:,:]
         leg_i_eef = torch.einsum("bkl,bilm->bikm",rob_tf.get_matrix(),leg_i_eef_trans)
         eef_pos = leg_i_eef[:,:,:3,3]
@@ -203,16 +204,16 @@ def solve_all_legs_ik(goal, batch_size=1):
     assert goal.get_matrix().shape[0] == NUM_Legs
     
     # generate random initial guess for optimization
-    xy = torch.rand(batch_size, 2) # xy base position
+    xyz = torch.rand(batch_size, 3) # xyz base position
     z_rot = torch.rand(batch_size, 1) # z rotation angle of base
     theta = th_0 # torch.rand(batch_size, 18) # joint angles
-    params = torch.cat([xy,z_rot,theta], dim=-1)
+    params = torch.cat([xyz,z_rot,theta], dim=-1)
     
     def cost_function(params):
-        rob_tf = pk.Transform3d(pos=torch.cat([params[:,:2],torch.zeros(batch_size,1)],dim=-1), 
-                                    rot=torch.cat([torch.zeros(batch_size,2),params[:,2].unsqueeze(-1)],dim=-1))
+        rob_tf = pk.Transform3d(pos=torch.cat([params[:,:3]],dim=-1), 
+                                    rot=torch.cat([torch.zeros(batch_size,2),params[:,3].unsqueeze(-1)],dim=-1))
 
-        _, leg_trans = get_transformation(params[:,3:])
+        _, leg_trans = get_transformation(params[:,4:])
         leg_i_eef_trans = leg_trans[:,list(range(6)),-1,:,:]
         leg_i_eef = torch.einsum("bkl,bilm->bikm",rob_tf.get_matrix(),leg_i_eef_trans)
         eef_pos = leg_i_eef[:,:,:3,3]
@@ -222,7 +223,7 @@ def solve_all_legs_ik(goal, batch_size=1):
         
         cost = residual_squared.sum()
         return cost
-
+    
     res = minimize(
         cost_function, 
         params, 
@@ -231,7 +232,6 @@ def solve_all_legs_ik(goal, batch_size=1):
         max_iter=50,
         disp=2
         )
-    
     print("result:\n", res.x)
     print("res.success: ", res.success)
     return res.x
@@ -250,14 +250,24 @@ meshes_right = [trimesh.load_mesh(f"urdf/yuna_stl/{name}.STL") for name in mesh_
 def visualize(base_trans, leg_trans, batch_size=batch_size, goal=None):
     scene = trimesh.Scene()
     spacing = 1.5  # spacing between robots
-
-    # Pre-allocate transformed meshes to reduce memory overhead
     transformed_bases = []
     transformed_legs = []
-
-    for k in range(batch_size):  # batch size
-        translation = np.array([k * spacing, 0, 0])  # translate to place robot side by side
+    axes = []
+    
+    for k in range(batch_size):
+        trans_dist = k * spacing
+        translation = np.array([trans_dist, 0, 0])  # translate to place robot side by side
         
+        # Add world origin axes
+        axis_length = .5
+        x_axis = trimesh.load_path([[trans_dist, 0, 0], [trans_dist + axis_length, 0, 0]])
+        y_axis = trimesh.load_path([[trans_dist, 0, 0], [trans_dist, axis_length, 0]])
+        z_axis = trimesh.load_path([[trans_dist, 0, 0], [trans_dist, 0, axis_length]])
+        x_axis.colors  = [[255, 0, 0, 255] * len(x_axis.entities)]
+        y_axis.colors  = [[0, 255, 0, 255] * len(x_axis.entities)]
+        z_axis.colors  = [[0, 0, 255, 255] * len(x_axis.entities)]
+        axes.extend([x_axis, y_axis, z_axis])
+
         # Transform base mesh
         transformed_base = mesh_base.copy()
         transformed_base.apply_transform(base_trans[k].detach().numpy())
@@ -269,6 +279,7 @@ def visualize(base_trans, leg_trans, batch_size=batch_size, goal=None):
             leg_transforms = leg_trans[k, i]
             color = colors[i]
 
+            # Transform leg meshes
             for j, mesh in enumerate(leg_meshes):
                 transformed_mesh = mesh.copy()
                 transformed_mesh.apply_transform(leg_transforms[j].detach().numpy())
@@ -284,10 +295,11 @@ def visualize(base_trans, leg_trans, batch_size=batch_size, goal=None):
                 sphere.visual.face_colors = [255, 0, 0, 200]
             scene.add_geometry(spheres)
         
-    # Add all transformed meshes to the scene at once
+    # Add all meshes to the scene at once
     scene.add_geometry(transformed_bases)
     scene.add_geometry(transformed_legs)
-
+    scene.add_geometry(axes)
+    
     scene.show()
     
     
@@ -297,39 +309,41 @@ if __name__=='__main__':
     # base_trans0, leg_trans = get_transformation(th_0[0].reshape(1,18), batch_size=1)
     # visualize(base_trans=base_trans0, leg_trans=leg_trans, batch_size=1, goal=None)
     
-    solve_single_leg = False
-    solve_all_legs = True
+    valid_modes = ["all_legs", "single_leg", "multiple_legs"]
+    solve_mode = "all_legs"
+    if solve_mode not in valid_modes:
+        print(f"Error: Invalid solve mode '{solve_mode}'. Valid options are: {', '.join(valid_modes)}.")
+        sys.exit(1) 
     
-    if solve_all_legs:
-        pos = torch.tensor([[0.5, 0.3, 0], 
-                            [0.5, -0.3, 0], 
-                            [0.05, .5, 0],
-                            [0.05, -.5, 0],
-                            [-.45, 0.3, 0],
-                            [-.45, -0.3, 0]])
+    if solve_mode == "all_legs":
+        pos = torch.tensor([[0.51589, 0.23145, 0.3],
+                            [0.51589, -0.23145, 0],
+                            [0.0575, 0.5125, 0],
+                            [0.0575, -0.5125, 0.3],
+                            [-0.45839, 0.33105, 0.3],
+                            [-0.45839, -0.33105, 0]])
         rot = torch.zeros_like(pos)
-        goal = pk.Transform3d(pos=pos, rot=rot)
+        goal = pk.Transform3d(pos=pos, rot=rot)        
         params = solve_all_legs_ik(goal, batch_size=batch_size)    
     
-    elif solve_single_leg:
-        # GOAL: minimize distance of leg 1 to goal
+    elif solve_mode == "single_leg":
         leg_idx = 0
         pos = torch.tensor([0.3, 0.3, -0.1])
         rot = torch.tensor([0.0, 0.0, 0.0])
         goal = pk.Transform3d(pos=pos, rot=rot)
         params = solve_single_leg_ik(goal=goal, leg_idx=leg_idx, batch_size=batch_size)
 
-    else:
-        # leg_idxs = [0, 1]
-        # pos = torch.tensor([[0.5, 0.3, -0.1], 
-        #                     [0.5, -0.3, 0]])
-        leg_idxs = [0, 1, 2, 3, 4, 5]
-        pos = torch.tensor([[0.5, 0.3, 0], 
-                            [0.5, -0.3, 0], 
-                            [0.05, .5, 0],
-                            [0.05, -.5, 0],
-                            [-.45, 0.3, 0],
-                            [-.45, -0.3, 0]])
+    elif solve_mode == "multiple_legs":
+        leg_idxs = [0, 1]
+        pos = torch.tensor([[0.5, 0.3, -0.1], 
+                            [0.5, -0.3, 0]])
+        # leg_idxs = [0, 1, 2, 3, 4, 5]
+        # pos = torch.tensor([[0.5, 0.3, 0], 
+        #                     [0.5, -0.3, 0], 
+        #                     [0.05, .5, 0],
+        #                     [0.05, -.5, 0],
+        #                     [-.45, 0.3, 0],
+        #                     [-.45, -0.3, 0]])
         rot = torch.zeros_like(pos)
         goal = pk.Transform3d(pos=pos, rot=rot)
         params = solve_multiple_legs_ik(goal, leg_idxs=leg_idxs, batch_size=batch_size)
@@ -339,5 +353,13 @@ if __name__=='__main__':
     #         params[:,3+3*i:3+3*(i+1)] = th_0[:,3*i:3*(i+1)]
       
     robot_frame_trans, base_trans, leg_trans = get_transformations_from_params(params)
+    
+    for i in range(batch_size):
+        print(f"Solution {i + 1}:")
+        print("robot_frame_trans:\n", robot_frame_trans[i].detach().numpy())
+        print("base_trans:\n", base_trans[i].detach().numpy())
+        for j in range(NUM_Legs):
+            print(f"leg{j}_trans:\n", leg_trans[i][j][-1].detach().numpy())
+    
     visualize(base_trans=base_trans, leg_trans=leg_trans, goal=pos)
 
