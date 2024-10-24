@@ -13,11 +13,12 @@ class YunaEnv:
         self.real_robot_control = real_robot_control
         self.visualiser = visualiser
         self.camerafollow = camerafollow
-        self.dt = 1 /240
+        self.dt = 1/240
         self.xmk, self.imu, self.hexapod, self.fbk_imu, self.fbk_hp, self.group_command, self.group_feedback = self.robot_connect()
         self.error = np.zeros((18,))
         self.all_reaction_forces = []
         self.all_joint_torques = []
+        self.complex_terrain = False
         self.pybullet_on = pybullet_on
         if self.pybullet_on:
             self._load_env()
@@ -170,7 +171,27 @@ class YunaEnv:
         self.friction = 1.5
         # load ground
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
-        self.groundID = p.loadURDF('plane.urdf')
+
+        if self.complex_terrain:
+            heightPerturbationRange = 0.1
+            numHeightfieldRows = 256
+            numHeightfieldColumns = 256
+            resolution = 0.05
+            heightfieldData = [0]*numHeightfieldRows*numHeightfieldColumns 
+            for j in range (int(numHeightfieldColumns/2)):
+                for i in range (int(numHeightfieldRows/2) ):
+                    height = random.uniform(0,heightPerturbationRange)
+                    heightfieldData[2*i+2*j*numHeightfieldRows]=height
+                    heightfieldData[2*i+1+2*j*numHeightfieldRows]=height
+                    heightfieldData[2*i+(2*j+1)*numHeightfieldRows]=height
+                    heightfieldData[2*i+1+(2*j+1)*numHeightfieldRows]=height
+            terrainShape = p.createCollisionShape(shapeType = p.GEOM_HEIGHTFIELD, meshScale=[resolution,resolution,1], 
+                                                  heightfieldTextureScaling=(numHeightfieldRows-1)/2, heightfieldData=heightfieldData, 
+                                                  numHeightfieldRows=numHeightfieldRows, numHeightfieldColumns=numHeightfieldColumns)
+            self.groundID  = p.createMultiBody(0, terrainShape)
+        else:
+            self.groundID = p.loadURDF('plane.urdf')
+            
         p.setGravity(0, 0, self.gravity)
         p.changeDynamics(self.groundID, -1, lateralFriction=self.friction)
         # load Yuna robot
@@ -188,19 +209,10 @@ class YunaEnv:
             self._cam_follow()
             p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1)
             
-    def load_wall(self, add_strip=False, wall_size=[1.5, 0.03, 0.75], wall_position = [0, .6, 0.75], wall_orientation = [0, 0, 0, 1.0]):
+    def load_wall(self, wall_size=[1.5, 0.03, 0.75], wall_position = [0, .6, 0.75], wall_orientation = [0, 0, 0, 1.0]):
         wall_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=wall_size)
         self.wallID = p.createMultiBody(baseMass=0, baseCollisionShapeIndex=wall_shape, basePosition=wall_position, baseOrientation=wall_orientation)
         p.changeDynamics(self.wallID, -1, lateralFriction=self.friction)
-        
-        if add_strip:
-            strip_thickness = 0.02
-            strip_height = 0.01
-            strip_size = [wall_size[0], strip_thickness, strip_height]
-            strip_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=strip_size)
-            strip1_position = [wall_position[0], wall_position[1]-wall_size[1]-strip_thickness, 0.4-strip_height*2.5]
-            self.strip1ID = p.createMultiBody(baseMass=0, baseCollisionShapeIndex=strip_shape, basePosition=strip1_position, baseOrientation=wall_orientation)
-            p.changeDynamics(self.wallID, -1, lateralFriction=6)
         
     def _init_robot(self):
         '''
