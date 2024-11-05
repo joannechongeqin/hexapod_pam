@@ -1,7 +1,10 @@
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 '''
 This is a test of controller using pygame joystick module, you can use it to test your controller connection and get the button and axis information.
 '''
-import sys
 import pygame
 from pygame.locals import *
 pygame.init()
