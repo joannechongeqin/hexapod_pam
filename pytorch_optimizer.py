@@ -1,3 +1,4 @@
+import os
 import math
 import pytorch_kinematics as pk
 import torch
@@ -14,6 +15,7 @@ chains = [] # list to store chain for each leg
 batch_size = 2
 np.set_printoptions(precision=4, suppress=True)
 torch.set_printoptions(precision=4, sci_mode=False)
+curr_dir = os.path.dirname(os.path.abspath(__file__))
 
 # initial [guess] joint angles for robot's legs (all legs on ground, joints at 90 deg)
 # 1x18, each group of 3 values represents joint angles for each leg
@@ -41,7 +43,7 @@ def get_transformation(theta, batch_size=batch_size):
     
     for i in range(NUM_LEGS):
         # build serial chain for each leg, add to the list of chains
-        chain = pk.build_serial_chain_from_urdf(open("urdf/yuna.urdf").read().encode(),f"leg{i+1}__FOOT") 
+        chain = pk.build_serial_chain_from_urdf(open(os.path.join(curr_dir, "urdf", "yuna.urdf")).read().encode(),f"leg{i+1}__FOOT") 
         # ^NOTE: suppressed "unknown tag warning" at /home/jceqin/.local/lib/python3.10/site-packages/pytorch_kinematics/urdf_parser_py/xml_reflection/core.py
         chains.append(chain)
         
@@ -243,9 +245,9 @@ colors = [cmap(i)[:3] for i in range(NUM_LEGS)]
 colors_name = ["blue", "orange", "green", "red", "purple", "brown"]
 mesh_name_left = ["M6_base_motor","M6_left_link1_red","M6_link2_red","M6_link3_red"]
 mesh_name_right = ["M6_base_motor","M6_right_link1_red","M6_link2_red","M6_link3_red"]
-mesh_base = trimesh.load_mesh("urdf/yuna_stl/M6_base_matt6_boxed_full.STL")
-meshes_left = [trimesh.load_mesh(f"urdf/yuna_stl/{name}.STL") for name in mesh_name_left]
-meshes_right = [trimesh.load_mesh(f"urdf/yuna_stl/{name}.STL") for name in mesh_name_right]
+mesh_base = os.path.join(curr_dir, "urdf", "yuna_stl", "M6_base_matt6_boxed_full.STL")
+meshes_left = [trimesh.load_mesh(os.path.join(curr_dir, "urdf", "yuna_stl", f"{name}.STL")) for name in mesh_name_left]
+meshes_right = [trimesh.load_mesh(os.path.join(curr_dir, "urdf", "yuna_stl", f"{name}.STL")) for name in mesh_name_right]
 
 def visualize(base_trans, leg_trans, batch_size=batch_size, goal=None):
     scene = trimesh.Scene()
