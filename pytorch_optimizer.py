@@ -258,7 +258,7 @@ colors = [cmap(i)[:3] for i in range(NUM_LEGS)]
 colors_name = ["blue", "orange", "green", "red", "purple", "brown"]
 mesh_name_left = ["M6_base_motor","M6_left_link1_red","M6_link2_red","M6_link3_red"]
 mesh_name_right = ["M6_base_motor","M6_right_link1_red","M6_link2_red","M6_link3_red"]
-mesh_base = os.path.join(curr_dir, "urdf", "yuna_stl", "M6_base_matt6_boxed_full.STL")
+mesh_base = trimesh.load_mesh(os.path.join(curr_dir, "urdf", "yuna_stl", "M6_base_matt6_boxed_full.STL"))
 meshes_left = [trimesh.load_mesh(os.path.join(curr_dir, "urdf", "yuna_stl", f"{name}.STL")) for name in mesh_name_left]
 meshes_right = [trimesh.load_mesh(os.path.join(curr_dir, "urdf", "yuna_stl", f"{name}.STL")) for name in mesh_name_right]
 
