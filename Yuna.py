@@ -221,41 +221,41 @@ class Yuna:
             self.move_legs_by_pos_in_body_frame([move_by_pos_arr])
         return move_by_pos_arr
     
-    def wall_transition_step_ground_leg(self, step_len, leg4_step_half=False, raise_h=0.05):
-        '''
-        assuming stepping sideway to left, ground legs are at the right side
-        '''
-        for leg_index in [1, 3, 5]:
-            if leg4_step_half and leg_index == 3:
-                final_step_len = step_len / 2
-            else:
-                final_step_len = step_len
-            raise_leg = np.zeros((3,6))
-            raise_leg[:, leg_index] = [0, final_step_len/2, raise_h]
-            step_leg = np.zeros((3,6))
-            step_leg[:, leg_index] = [0, final_step_len/2, -raise_h]
-            self.move_legs_by_pos_in_world_frame([raise_leg, step_leg])
+    # def wall_transition_step_ground_leg(self, step_len, leg4_step_half=False, raise_h=0.05):
+    #     '''
+    #     assuming stepping sideway to left, ground legs are at the right side
+    #     '''
+    #     for leg_index in [1, 3, 5]:
+    #         if leg4_step_half and leg_index == 3:
+    #             final_step_len = step_len / 2
+    #         else:
+    #             final_step_len = step_len
+    #         raise_leg = np.zeros((3,6))
+    #         raise_leg[:, leg_index] = [0, final_step_len/2, raise_h]
+    #         step_leg = np.zeros((3,6))
+    #         step_leg[:, leg_index] = [0, final_step_len/2, -raise_h]
+    #         self.move_legs_by_pos_in_world_frame([raise_leg, step_leg])
     
-    def wall_transition_first_step_wall_leg(self, step_height, wall_dist):
-        '''
-        :param step_height: The height of the first step
-        :param wall_dist: The distance of the first step to the wall [leg1, leg3, leg5]
-        assuming stepping sideway to left, wall legs are at the left side
-        '''
-        for leg_index in [0, 2, 4]:
-            raise_leg = np.zeros((3,6))
-            raise_leg[:, leg_index] = [0, 0, step_height]
-            step_leg = np.zeros((3,6))
-            step_leg[:, leg_index] = [0, wall_dist, 0]
-            self.move_legs_by_pos_in_world_frame([raise_leg, step_leg])
+    # def wall_transition_first_step_wall_leg(self, step_height, wall_dist):
+    #     '''
+    #     :param step_height: The height of the first step
+    #     :param wall_dist: The distance of the first step to the wall [leg1, leg3, leg5]
+    #     assuming stepping sideway to left, wall legs are at the left side
+    #     '''
+    #     for leg_index in [0, 2, 4]:
+    #         raise_leg = np.zeros((3,6))
+    #         raise_leg[:, leg_index] = [0, 0, step_height]
+    #         step_leg = np.zeros((3,6))
+    #         step_leg[:, leg_index] = [0, wall_dist, 0]
+    #         self.move_legs_by_pos_in_world_frame([raise_leg, step_leg])
     
-    def wall_transition_step_wall_leg(self, step_len, clearance=0.06):
-        for leg_index in [0, 2, 4]:
-            raise_leg = np.zeros((3,6))
-            raise_leg[:, leg_index] = [0, -clearance/2, step_len/2]
-            step_leg = np.zeros((3,6))
-            step_leg[:, leg_index] = [0, +clearance/2, step_len/2]
-            self.move_legs_by_pos_in_world_frame([raise_leg, step_leg])
+    # def wall_transition_step_wall_leg(self, step_len, clearance=0.06):
+    #     for leg_index in [0, 2, 4]:
+    #         raise_leg = np.zeros((3,6))
+    #         raise_leg[:, leg_index] = [0, -clearance/2, step_len/2]
+    #         step_leg = np.zeros((3,6))
+    #         step_leg[:, leg_index] = [0, +clearance/2, step_len/2]
+    #         self.move_legs_by_pos_in_world_frame([raise_leg, step_leg])
 
     def disconnect(self):
         '''

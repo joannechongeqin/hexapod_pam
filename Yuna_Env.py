@@ -65,10 +65,10 @@ class YunaEnv:
                     forces = [60]*18
                     )
                 p.stepSimulation()
-                reaction_forces = self.get_robot_joint_reaction_forces() # 18 (joints) x 6 (Fx Fy Fz Mx My Mz)
-                torques_applied = self.get_robot_joint_motor_torques_applied()
-                self.all_reaction_forces.append(reaction_forces)
-                self.all_joint_torques.append(torques_applied)
+                # reaction_forces = self.get_robot_joint_reaction_forces() # 18 (joints) x 6 (Fx Fy Fz Mx My Mz)
+                # torques_applied = self.get_robot_joint_motor_torques_applied()
+                # self.all_reaction_forces.append(reaction_forces)
+                # self.all_joint_torques.append(torques_applied)
                 # print("Reaction forces: \n", reaction_forces)
                 # print("Torques: \n", torques_applied)
                 if self.camerafollow:
@@ -80,41 +80,41 @@ class YunaEnv:
             else:
                 time.sleep(sleep)
         
-    def plot_reaction_forces_and_torque(self, joint_idx):
-        reaction_forces = np.array(self.all_reaction_forces)
-        torques = np.array(self.all_joint_torques)
-        # print("reaction_forces.shape:", reaction_forces.shape)
-        # print("torques.shape:", torques.shape)
+    # def plot_reaction_forces_and_torque(self, joint_idx):
+    #     reaction_forces = np.array(self.all_reaction_forces)
+    #     torques = np.array(self.all_joint_torques)
+    #     # print("reaction_forces.shape:", reaction_forces.shape)
+    #     # print("torques.shape:", torques.shape)
         
-        actuator_name = p.getJointInfo(self.YunaID, self.actuator[joint_idx])[1]
-        skip = 66 # skip the first 65 points (which is generated in init_robot)
-        fig, (ax1, ax2) = plt.subplots(2, 1)
+    #     actuator_name = p.getJointInfo(self.YunaID, self.actuator[joint_idx])[1]
+    #     skip = 66 # skip the first 65 points (which is generated in init_robot)
+    #     fig, (ax1, ax2) = plt.subplots(2, 1)
 
-        # --- First subplot: Reaction Forces and Moments ---
-        ax1.plot(reaction_forces[skip:, joint_idx, 0], label='Fx')
-        ax1.plot(reaction_forces[skip:, joint_idx, 1], label='Fy')
-        ax1.plot(reaction_forces[skip:, joint_idx, 2], label='Fz')
-        ax1.plot(reaction_forces[skip:, joint_idx, 3], label='Mx')
-        ax1.plot(reaction_forces[skip:, joint_idx, 4], label='My')
-        ax1.plot(reaction_forces[skip:, joint_idx, 5], label='Mz')
-        ax1.set_title(f"Reaction Forces and Moments of Joint {actuator_name}")
-        ax1.set_xlabel("Trajectory Points")
-        ax1.set_ylabel("Force (N) / Moment (Nm)")
-        ax1.legend()
-        ax1.grid(True)
+    #     # --- First subplot: Reaction Forces and Moments ---
+    #     ax1.plot(reaction_forces[skip:, joint_idx, 0], label='Fx')
+    #     ax1.plot(reaction_forces[skip:, joint_idx, 1], label='Fy')
+    #     ax1.plot(reaction_forces[skip:, joint_idx, 2], label='Fz')
+    #     ax1.plot(reaction_forces[skip:, joint_idx, 3], label='Mx')
+    #     ax1.plot(reaction_forces[skip:, joint_idx, 4], label='My')
+    #     ax1.plot(reaction_forces[skip:, joint_idx, 5], label='Mz')
+    #     ax1.set_title(f"Reaction Forces and Moments of Joint {actuator_name}")
+    #     ax1.set_xlabel("Trajectory Points")
+    #     ax1.set_ylabel("Force (N) / Moment (Nm)")
+    #     ax1.legend()
+    #     ax1.grid(True)
         
-        # --- Second subplot: Joint Torque ---
-        ax2.plot(torques[skip:, joint_idx], label='Torque', color='orange')
-        ax2.set_title(f"Torque of Joint {actuator_name}")
-        ax2.set_xlabel("Trajectory Points")
-        ax2.set_ylabel("Torque (Nm)")
-        ax2.legend()
-        ax2.grid(True)
-        plt.tight_layout()
-        # plt.show() # block=False will froze the program 
-        folder = os.path.join(os.getcwd(), 'forces_torques')
-        filename = os.path.join(folder, f"joint_{actuator_name}.png")
-        plt.savefig(filename)
+    #     # --- Second subplot: Joint Torque ---
+    #     ax2.plot(torques[skip:, joint_idx], label='Torque', color='orange')
+    #     ax2.set_title(f"Torque of Joint {actuator_name}")
+    #     ax2.set_xlabel("Trajectory Points")
+    #     ax2.set_ylabel("Torque (Nm)")
+    #     ax2.legend()
+    #     ax2.grid(True)
+    #     plt.tight_layout()
+    #     # plt.show() # block=False will froze the program 
+    #     folder = os.path.join(os.getcwd(), 'forces_torques')
+    #     filename = os.path.join(folder, f"joint_{actuator_name}.png")
+    #     plt.savefig(filename)
 
     def close(self):
         '''
