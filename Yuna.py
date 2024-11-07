@@ -4,11 +4,20 @@ import numpy as np
 from functions import transxy, solveFK, rotx
 import time
 
+h = 0.12
+eePos = np.array(  [[0.51589,    0.51589,   0.0575,     0.0575,     -0.45839,   -0.45839],
+                    [0.23145,   -0.23145,   0.5125,     -0.5125,    0.33105,    -0.33105],
+                    [   -h,         -h,         -h,         -h,         -h,         -h]])
+
 class Yuna:
-    def __init__(self, visualiser=True, camerafollow=True, real_robot_control=False, pybullet_on=True, show_ref_points=False):
+    def __init__(self, visualiser=True, camerafollow=True, real_robot_control=False, pybullet_on=True, show_ref_points=False, 
+                    eePos=eePos, bodyPos=np.array([0., 0., 0.])):
+        # NOTE: bodyPos in world frame, eePos in body frame
         # initialise the environment
-        self.env = YunaEnv(visualiser=visualiser, camerafollow=camerafollow, real_robot_control=real_robot_control, pybullet_on=pybullet_on)
-        self.eePos = self.env.eePos.copy() # robot leg end-effecter position w.r.t body frame
+        self.env = YunaEnv(visualiser=visualiser, camerafollow=camerafollow, real_robot_control=real_robot_control, pybullet_on=pybullet_on, 
+                                eePos=eePos, bodyPos=bodyPos)
+        self.bodyPos = self.env.bodyPos.copy() # initial robot body position in world frame
+        self.eePos = self.env.eePos.copy() # initial robot leg end-effecter position w.r.t body frame
         self.eeAng = np.array([0., 0., 0., 0., 0., 0.,]) # the deviation of each leg from neutral position, use 0. to initiate a float type array
         self.init_pose = np.zeros((4, 6))
         self.current_pose = np.copy(self.init_pose)

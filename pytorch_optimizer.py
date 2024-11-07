@@ -94,10 +94,11 @@ def get_transformations_from_params(params):
                                 Shape: [batch_size, 21], where the first 18 values are joint angles, 
                                 and the remaining 3 are base parameters (x,y,z) in world frame. 
 
-    :return: robot_frame_trans, base_trans, leg_trans
-    - robot_frame_trans (torch.Tensor): Transformation matrix of robot frame in world frame. Shape: [batch_size, 4, 4].
-    - base_trans (torch.Tensor): Base transformation matrix in world frame. Shape: [batch_size, 4, 4].
-    - leg_trans (torch.Tensor): Leg transformation matrices in world frame. Shape: [batch_size, NUM_Legs, num_of_links_per_leg, 4, 4].
+    :return: robot_frame_trans_w, base_trans_w, leg_trans_w, leg_trans_r
+    - robot_frame_trans_w (torch.Tensor): Transformation matrix of robot frame in world frame. Shape: [batch_size, 4, 4].
+    - base_trans_w (torch.Tensor): Base transformation matrix in world frame. Shape: [batch_size, 4, 4].
+    - leg_trans_w (torch.Tensor): Leg transformation matrices in world frame. Shape: [batch_size, NUM_Legs, num_of_links_per_leg, 4, 4].
+    - leg_trans_r (torch.Tensor): Leg transformation matrices in robot frame. Shape: [batch_size, NUM_Legs, num_of_links_per_leg, 4, 4].
     """
     rob_tf_w = pk.Transform3d(pos=torch.cat([params[:,18:]],dim=-1), 
                             rot=torch.cat([torch.zeros(batch_size,3)],dim=-1))
@@ -108,7 +109,7 @@ def get_transformations_from_params(params):
     base_trans_w = torch.bmm(robot_frame_trans_w,base_trans_r)
     leg_trans_w = torch.einsum('bkl,bijlm->bijkm',robot_frame_trans_w,leg_trans_r) # einsum = Einstein summation notation, for specifying complex tensor operations with concise notation
     
-    return robot_frame_trans_w, base_trans_w, leg_trans_w
+    return robot_frame_trans_w, base_trans_w, leg_trans_w, leg_trans_r
 
 
 def check_pose_validity(leg_pos, body_pos, legs_on_ground):
@@ -350,15 +351,15 @@ if __name__=='__main__':
     goal = pk.Transform3d(pos=pos, rot=rot)
     params = solve_multiple_legs_ik(goal, legs_on_ground=legs_on_ground, legs_plane=legs_plane, leg_idxs=leg_idxs, batch_size=batch_size)
               
-    robot_frame_trans, base_trans, leg_trans = get_transformations_from_params(params)
+    robot_frame_trans_w, base_trans_w, leg_trans_w, leg_trans_r = get_transformations_from_params(params)
     
     # --- print solutions + visualization ---
     for i in range(batch_size):
         print(f"Solution {i + 1}:")
-        print("robot_frame_trans:\n", robot_frame_trans[i].detach().numpy())
-        print("base_trans:\n", base_trans[i].detach().numpy())
+        print("robot_frame_trans:\n", robot_frame_trans_w[i].detach().numpy())
+        print("base_trans:\n", base_trans_w[i].detach().numpy())
         for j in range(NUM_LEGS):
-            print(f"leg{j}_trans:\n", leg_trans[i][j][-1].detach().numpy())
+            print(f"leg{j}_trans:\n", leg_trans_w[i][j][-1].detach().numpy())
     
-    visualize(base_trans=base_trans, leg_trans=leg_trans, goal=pos)
+    visualize(base_trans=base_trans_w, leg_trans=leg_trans_w, goal=pos)
 

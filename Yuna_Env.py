@@ -8,22 +8,31 @@ from robot_setup.yunaKinematics import *
 from functions import hebi2bullet, bullet2hebi, solveIK, solveFK
 import matplotlib.pyplot as plt
 
+h = 0.12
+eePos = np.array(  [[0.51589,    0.51589,   0.0575,     0.0575,     -0.45839,   -0.45839],
+                    [0.23145,   -0.23145,   0.5125,     -0.5125,    0.33105,    -0.33105],
+                    [   -h,         -h,         -h,         -h,         -h,         -h]])
 class YunaEnv:
-    def __init__(self, real_robot_control=True, pybullet_on=True, visualiser=True, camerafollow=True):
+    def __init__(self, real_robot_control=True, pybullet_on=True, visualiser=True, camerafollow=False, 
+                    eePos=eePos, bodyPos=np.array([0., 0., 0.])):
         self.real_robot_control = real_robot_control
         self.visualiser = visualiser
         self.camerafollow = camerafollow
         self.dt = 1/240
         self.xmk, self.imu, self.hexapod, self.fbk_imu, self.fbk_hp, self.group_command, self.group_feedback = self.robot_connect()
         self.error = np.zeros((18,))
-        self.all_reaction_forces = []
-        self.all_joint_torques = []
+        # self.all_reaction_forces = []
+        # self.all_joint_torques = []
         self.complex_terrain = False
         self.pybullet_on = pybullet_on
+        
+        self.eePos = eePos.copy() # neutral position for the robot
+        self.bodyPos = bodyPos.copy()
+
         if self.pybullet_on:
             self._load_env()
         self._init_robot()
-
+    
     def step(self, targetPositions, iteration=1, sleep='auto'):
         '''
         Advance the simulation and physical robot by one step
@@ -195,8 +204,9 @@ class YunaEnv:
         p.setGravity(0, 0, self.gravity)
         p.changeDynamics(self.groundID, -1, lateralFriction=self.friction)
         # load Yuna robot
-        Yuna_init_pos = [0,0,0.5]
-        Yuna_init_orn = p.getQuaternionFromEuler([0,0,0])
+        # Yuna_init_pos = [0,0,0.5]
+        Yuna_init_pos = np.append(self.bodyPos.copy()[:2], 0.5)
+        Yuna_init_orn = p.getQuaternionFromEuler([0,0,0]) # TODO
         Yuna_file_path = os.path.abspath(os.path.dirname(__file__)) + '/urdf/yuna.urdf'
         self.YunaID = p.loadURDF(Yuna_file_path, Yuna_init_pos, Yuna_init_orn)
         self.joint_num = p.getNumJoints(self.YunaID) # 41
@@ -213,22 +223,18 @@ class YunaEnv:
         wall_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=wall_size)
         self.wallID = p.createMultiBody(baseMass=0, baseCollisionShapeIndex=wall_shape, basePosition=wall_position, baseOrientation=wall_orientation)
         p.changeDynamics(self.wallID, -1, lateralFriction=self.friction)
-        
+
     def _init_robot(self):
         '''
         Initialise the robot to the neutral position in the pybullet simulation
         :return: None
         '''
         # parameters
-        self.h = 0.12 #0.2249 # body height
-        self.eePos = np.array( [[0.51589,    0.51589,   0.0575,     0.0575,     -0.45839,   -0.45839],
-                                [0.23145,   -0.23145,   0.5125,     -0.5125,    0.33105,    -0.33105],
-                                [-self.h,   -self.h,    -self.h,    -self.h,    -self.h,    -self.h]]) # neutral position for the robot
         init_pos = self.eePos.copy()
         self.step(init_pos, iteration=65, sleep='auto')
         for i in self.actuator:
             p.enableJointForceTorqueSensor(self.YunaID, i, 1) # enable force/torque sensor
-  
+
     def get_body_pose(self):
         '''
         Get the position and orientation of the robot in the pybullet simulation
