@@ -198,7 +198,7 @@ def visualize_convex_hull(points, hull_points, interior_point, batch_idx=0):
 
     plt.legend()
     plt.grid(True)
-    plt.title(f"Convex Hull and Distances (Batch {batch_idx})")
+    plt.title(f"Convex Hull (Batch {batch_idx})")
     plt.xlabel("x")
     plt.ylabel("y")
     plt.axis('equal')
@@ -215,51 +215,12 @@ def ssm_cost_function(body_xys):
         if not point_in_hull(body_point, hull_points2[i]):
             cost -= 1e6  # Apply penalty for points outside the polygon
 
-    return - cost
+    return - cost # negative because using minimize (and we want to maximize ssm)
 
 
 if __name__=='__main__':
 
     # --- TEST 1 ---
-    # points = torch.tensor([
-    #     [
-    #         [0.4412, 0.2555],
-    #         [0.4411, -0.1315],
-    #         [-0.3564, 0.3292],
-    #         [-0.3565, -0.2049],
-    #         [0.0, 0.0]  # A point that is inside the hull
-    #     ],
-    #     [
-    #         [0.5, 0.5],
-    #         [0.6, -0.2],
-    #         [-0.1, 0.7],
-    #         [-0.2, -0.5],
-    #         [0.2, 0.0]  # A point that is inside the second hull
-    #     ]
-    # ])
-
-    # # Compute convex hull for the batch
-    # hull_points = convex_hull_pam(points)
-
-    # # Example interior points (one per batch)
-    # interior_points = torch.tensor([
-    #     [0.0, 0.0],  # Inside the first convex hull
-    #     [0.1, 0.1]   # Inside the second convex hull
-    # ])
-
-    # # Compute distances from the interior point to the edges of the convex hull
-    # distances = point_to_edge_distances(interior_points, hull_points)
-
-    # print("Convex Hull Points:")
-    # print(hull_points)
-    # print("\nDistances to each edge of the convex hull:")
-    # print(distances)
-    # visualize_convex_hull(points, hull_points, interior_points, batch_idx=0)
-    # visualize_convex_hull(points, hull_points, interior_points, batch_idx=1)
-    # stability_margin_values = static_stability_margin(points, interior_points)
-
-
-    # --- TEST 2 ---
     eef_support_xy_pos = torch.tensor([
         [[ 0.0104,  0.4236],
         [ 0.0103, -0.4166],
