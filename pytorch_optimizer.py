@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from torchmin import minimize
 import numpy as np
 from static_stability_margin import convex_hull_pam, static_stability_margin, point_in_hull
+import logging
 
 PI = math.pi
 NUM_LEGS = 6
@@ -18,6 +19,7 @@ GROUND_PLANE = 0.0 # height of ground plane
 PLANE1 = 0.1
 PLANE2 = 0.2
 
+logging.basicConfig(level=logging.INFO, format='%(message)s') # format='%(asctime)s - %(levelname)s - %(message)s
 np.set_printoptions(precision=4, suppress=True)
 torch.set_printoptions(precision=4, sci_mode=False)
 curr_dir = os.path.dirname(os.path.abspath(__file__))
@@ -175,18 +177,24 @@ def solve_multiple_legs_ik(goal, leg_idxs, legs_on_ground, legs_plane, batch_siz
 
         all_eef_pos_w = torch.einsum("bkl,bilm->bikm",rob_tf_w.get_matrix(),eef_trans_r)
         target_eef_pos_w = all_eef_pos_w[:,leg_idxs,:3,3] # extract pos (xyz) of end-effectors
-        # print(f"all_eef_pos: ", all_eef_pos)
-        # print("target_eef_pos: ", target_eef_pos)
         eef_pos_residual_squared = (target_eef_pos_w - goal.get_matrix()[:,:3,3].unsqueeze(0))**2 # calculate squared diff between eef pos and goal pos
+        logging.debug("\n--- optimizing based on distance between eef pos and goal pos ---")
+        # print(f"all_eef_pos_w: {all_eef_pos_w}")
+        logging.debug(f"eef_pos:\n{target_eef_pos_w}")
+        logging.debug(f"goal_pos:\n{goal.get_matrix()[:,:3,3]}")
+        logging.debug(f"eef_pos_residual_squared:\n{eef_pos_residual_squared}")
 
         # --- optimize based on free legs' height ---
+        # free legs = legs not specified for target goal pos (xyz), but heights are fixed to a specific plane
         free_legs = [i for i in range(NUM_LEGS) if i not in leg_idxs]
         free_legs_height = all_eef_pos_w[:, free_legs, 2, 3]
         free_legs_plane = torch.tensor(legs_plane)[free_legs].repeat(batch_size, 1)
-        # print("free_legs_height: ", free_legs_height)
-        # print("free_legs_plane: ", free_legs_plane)
         free_legs_height_residual_squared = (free_legs_height - free_legs_plane) ** 2
-        
+        logging.debug("\n--- optimizing based on free legs' height ---")
+        logging.debug(f"free_legs_height:\n{free_legs_height}")
+        logging.debug(f"free_legs_plane:\n{free_legs_plane}")
+        logging.debug(f"free_legs_height_residual_squared:\n{free_legs_height_residual_squared}")
+
         # --- optimize based on static stability margin (min dist from the CoM to the edges of support polygon) ---
         # project all points to a ground plane and draw support polygon using legs on ground
         # then minimize distance of body CoM to the centroid of the support polygon
@@ -197,37 +205,40 @@ def solve_multiple_legs_ik(goal, leg_idxs, legs_on_ground, legs_plane, batch_siz
         # print("eef_support_xy_pos: ", eef_support_xy_pos)
         # print("body_xys: ", body_xys)
         hull_points = convex_hull_pam(eef_support_xy_pos)
-        ssm_cost = static_stability_margin(eef_support_xy_pos, body_xys).mean()
-        # Check if each body_xys point is inside the support polygon
-        for i in range(body_xys.shape[0]):
+        ssm_cost = static_stability_margin(eef_support_xy_pos, body_xys)
+        logging.debug("\n--- optimizing based on static stability margin ---")
+        logging.debug(f"ssm:\n{ssm_cost}")
+        for i in range(body_xys.shape[0]): # Check if each body_xys point is inside the support polygon
             body_point = body_xys[i]
             if not point_in_hull(body_point, hull_points[i]):
                 ssm_cost -= 1e6  # Apply penalty for points outside the polygon
+                logging.warning("body xy not within support polygon")
 
         # --- optimize such that last link of supported legs is as perpendicular to ground as possible ---
         # when last link perpendicular to ground, x-axis of eef frame (pointing down) parallel to z-axis of world frame (pointing up)
         eef_trans_x_axis_w = all_eef_pos_w[:, eef_support_idxs, :3, 0] # extract x-axis of eef frame
         eef_trans_x_axis_ideal = torch.tensor([0., 0., -1.]).repeat(batch_size, len(eef_support_idxs), 1)
         last_link_perpendicular_residual = (eef_trans_x_axis_w - eef_trans_x_axis_ideal) ** 2
-        # print(f"eef_trans_x_axis_w: ", eef_trans_x_axis_w)
-        
+        logging.debug("\n--- optimizing based on last link perpendicularity ---")
+        logging.debug(f"x-axis of eef frame:\n{eef_trans_x_axis_w}")
+        logging.debug(f"last_link_perpendicular_residual:\n{last_link_perpendicular_residual}")
+
         # --- TODO: OPTIMIZE BODY HEIGHTS?
 
-        # --- check pose validity ---
+        # --- TODO: check pose validity? ---
         pose_penalty = torch.tensor([0 if check_pose_validity(leg_pos=all_eef_pos_w[i,:,:3,3], 
                                                                 body_pos=params[i,:3], legs_on_ground=legs_on_ground) 
                                         else 1e6 for i in range(batch_size)])
-        print("pose_penalty: ", pose_penalty)
+        # print("pose_penalty: ", pose_penalty)
 
         # --- final cost function ---
-        # print("eef_pos_residual_squared: ", eef_pos_residual_squared.sum())
-        # print("body_xy_residual_squared: ", body_xy_residual_squared.sum())
-        # print("free_legs_height_residual_squared: ", free_legs_height_residual_squared)
-        # print("ssm:", ssm_cost)  
-        # print("last_link_perpendicular_residual: ", last_link_perpendicular_residual)
-
-        cost = eef_pos_residual_squared.sum() + free_legs_height_residual_squared.sum() - ssm_cost + last_link_perpendicular_residual.sum() # + pose_penalty.sum()
-
+        cost = (
+            eef_pos_residual_squared.sum() +
+            free_legs_height_residual_squared.sum() -
+            ssm_cost.mean() +
+            last_link_perpendicular_residual.sum()
+            # + pose_penalty.sum()
+        )
         return cost
 
     res = minimize(
@@ -239,7 +250,7 @@ def solve_multiple_legs_ik(goal, leg_idxs, legs_on_ground, legs_plane, batch_siz
         disp=2
         )
     # print("result:\n", res.x)
-    print("res.success: ", res.success)
+    logging.debug(f"Optimization successful?:{res.success}")
     return res.x
 
       
@@ -316,13 +327,13 @@ def visualize(base_trans, leg_trans, batch_size=batch_size, goal=None):
 if __name__=='__main__':
     
     ## --- Visualize initial base and legs pose ---
-    # base_trans0, leg_trans = get_transformation_fk(th_0[0].reshape(1,18), batch_size=1)
+    # base_trans0, leg_trans0 = get_transformation_fk(th_0[0].reshape(1,18), batch_size=1)
+    # eef_trans0 = leg_trans0[:,:,-1,:,:]
     # print("base_trans0:\n", base_trans0.detach().numpy())
-    # print("leg_trans_r:\n", leg_trans)
-    # eef_trans = leg_trans[:,:,-1,:,:]
-    # print(f"eef_trans: shape={eef_trans.shape}\n", eef_trans)
-    # print("eef_trans_x_axis", eef_trans[:, :, :3, 0])
-    # visualize(base_trans=base_trans0, leg_trans=leg_trans, batch_size=1, goal=None) # base origin = world origin
+    # print("leg_trans0:\n", leg_trans0)
+    # print(f"eef_trans: shape={eef_trans0.shape}\n", eef_trans0)
+    # print("eef_trans_x_axis", eef_trans0[:, :, :3, 0])
+    # visualize(base_trans=base_trans0, leg_trans=leg_trans0, batch_size=1, goal=None) # base origin = world origin
     
     # --- SET 1 ---
     # leg_idxs = [0, 1]
@@ -335,8 +346,8 @@ if __name__=='__main__':
     leg_idxs = [0, 1]
     legs_on_ground = [False, False, True, True, True, True]
     legs_plane = [PLANE2, PLANE2, PLANE1, PLANE1, GROUND_PLANE, GROUND_PLANE]
-    pos = torch.tensor([[0.51589, 0.23145, PLANE2],
-                        [0.51589, -0.23145, PLANE2]])
+    pos = torch.tensor([[0.6, 0.3, PLANE2],
+                        [0.7, -0.2, PLANE2]])
     
     # --- SET 3 ---
     # leg_idxs = [0, 1, 2, 3, 4, 5]
