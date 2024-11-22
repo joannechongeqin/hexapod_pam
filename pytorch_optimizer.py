@@ -7,7 +7,7 @@ from matplotlib import colormaps
 import matplotlib.pyplot as plt
 from torchmin import minimize
 import numpy as np
-from shapely.geometry import Point, Polygon
+from static_stability_margin import convex_hull_pam, static_stability_margin, point_in_hull
 
 PI = math.pi
 NUM_LEGS = 6
@@ -23,7 +23,7 @@ torch.set_printoptions(precision=4, sci_mode=False)
 curr_dir = os.path.dirname(os.path.abspath(__file__))
 
 chains = [] # list to store chain for each leg
-# initial [guess] joint angles for robot's legs (base at origi, joints at 90 deg)
+# initial [guess] joint angles for robot's legs (base at origin, joints at 90 deg)
 # 1x18, each group of 3 values represents joint angles for each leg
 th_0 = torch.tensor([0, 0, -PI / 2, 
                      0, 0, PI / 2, 
@@ -31,8 +31,8 @@ th_0 = torch.tensor([0, 0, -PI / 2,
                      0, 0, PI / 2, 
                      0, 0, -PI / 2, 
                      0, 0, PI / 2]*batch_size).reshape((batch_size, 18))
+# TODO: CHANGE THIS TO THE NEUTRAL POSITION IN YUNA_ENV?
 
-    
 def get_transformation_fk(theta, batch_size=batch_size):
     """
     Computes transformation matrices for each leg based on given joint angles.
@@ -134,29 +134,8 @@ def check_pose_validity(leg_pos, body_pos, legs_on_ground):
         if get_distance(leg_pos[i], leg_pos[j]) > MAX_OPP_LEGS_DIST:
             print(f"Invalid pose: Distance between legs {i} and {j} (opposite pair) is too far")
             return False
-    
-    # --- check if body CoM is within support polygon ---
-    support_idxs = [i for i in range(NUM_LEGS) if legs_on_ground[i]]
-    support_polygon = Polygon(leg_pos[support_idxs, :2].detach().numpy()).convex_hull
-    body_xy = Point(body_pos[:2].detach().numpy())
-
-    # # visualization
-    # fig, ax = plt.subplots()
-    # centroid = support_polygon.centroid
-    # x, y = support_polygon.exterior.xy
-    # ax.fill(x, y, alpha=0.5, fc='blue', ec='black', label='support polygon')
-    # ax.plot(body_xy.x, body_xy.y, 'ro', label='body')
-    # ax.plot(centroid.x, centroid.y, 'go', label='centroid')
-    # ax.legend()
-    # ax.grid(True)
-    # plt.show()
-
-    if not support_polygon.contains(body_xy):
-        print("Invalid pose: Body CoM is outside of support polygon")
-        return False
-    
+        
     return True
-
 
 
 def solve_multiple_legs_ik(goal, leg_idxs, legs_on_ground, legs_plane, batch_size=1):
@@ -181,7 +160,9 @@ def solve_multiple_legs_ik(goal, leg_idxs, legs_on_ground, legs_plane, batch_siz
     base_xyz_w = torch.rand(batch_size, 3) # xyz base position
     # z_rot = torch.rand(batch_size, 1) # z rotation angle of base
     params = torch.cat([theta,base_xyz_w], dim=-1)
-    
+    # TODO: FIX BODY XY TO ORIGIN? ONLY OPTIMIZE BODY HEIGHT? THEN USE BODY POS FROM FK TO OPTIMIZE?
+    # TODO: MAKE BODY ROTATION AS PARAMS ALSO?
+
     def cost_function(params):
         # --- optimize based on distance between eef pos and goal pos ---
         #       rob_tf = Transform3d(pos=tensor([[x, y, z]]), rot=tensor([[quaternion (w,x,y,z) of euler angle (0, 0, z_rot)]])) 
@@ -204,22 +185,33 @@ def solve_multiple_legs_ik(goal, leg_idxs, legs_on_ground, legs_plane, batch_siz
         free_legs_plane = torch.tensor(legs_plane)[free_legs].repeat(batch_size, 1)
         # print("free_legs_height: ", free_legs_height)
         # print("free_legs_plane: ", free_legs_plane)
-        free_legs_residual_squared = (free_legs_height - free_legs_plane) ** 2
+        free_legs_height_residual_squared = (free_legs_height - free_legs_plane) ** 2
         
         # --- optimize based on static stability margin (min dist from the CoM to the edges of support polygon) ---
         # project all points to a ground plane and draw support polygon using legs on ground
         # then minimize distance of body CoM to the centroid of the support polygon
         eef_support_idxs = [i for i in range(NUM_LEGS) if legs_on_ground[i]]
-        # print("eef_support_idxs: ", eef_support_idxs)
         eef_support_xy_pos = all_eef_pos_w[:, eef_support_idxs, :2, 3]
-        print(eef_support_idxs)
-
+        body_xys = params[:,18:20] # size = (batch_size, 2)
+        # print("eef_support_idxs: ", eef_support_idxs)
         # print("eef_support_xy_pos: ", eef_support_xy_pos)
-        # centroids = eef_support_xy_pos.mean(dim=1) # NOTE: IF POSSIBLE MAYBE WILL NEED CONVEX HULL FOR EXTREME CASES(?)
-        # print("centroids: ", centroids)
-        # body_xys = params[:,18:20] # size = (batch_size, 2)
         # print("body_xys: ", body_xys)
-        # body_xy_residual_squared = (body_xys - centroids) ** 2        
+        hull_points = convex_hull_pam(eef_support_xy_pos)
+        ssm_cost = static_stability_margin(eef_support_xy_pos, body_xys).mean()
+        # Check if each body_xys point is inside the support polygon
+        for i in range(body_xys.shape[0]):
+            body_point = body_xys[i]
+            if not point_in_hull(body_point, hull_points[i]):
+                ssm_cost -= 1e6  # Apply penalty for points outside the polygon
+
+        # --- optimize such that last link of supported legs is as perpendicular to ground as possible ---
+        # when last link perpendicular to ground, x-axis of eef frame (pointing down) parallel to z-axis of world frame (pointing up)
+        eef_trans_x_axis_w = all_eef_pos_w[:, eef_support_idxs, :3, 0] # extract x-axis of eef frame
+        eef_trans_x_axis_ideal = torch.tensor([0., 0., -1.]).repeat(batch_size, len(eef_support_idxs), 1)
+        last_link_perpendicular_residual = (eef_trans_x_axis_w - eef_trans_x_axis_ideal) ** 2
+        # print(f"eef_trans_x_axis_w: ", eef_trans_x_axis_w)
+        
+        # --- TODO: OPTIMIZE BODY HEIGHTS?
 
         # --- check pose validity ---
         pose_penalty = torch.tensor([0 if check_pose_validity(leg_pos=all_eef_pos_w[i,:,:3,3], 
@@ -227,14 +219,14 @@ def solve_multiple_legs_ik(goal, leg_idxs, legs_on_ground, legs_plane, batch_siz
                                         else 1e6 for i in range(batch_size)])
         print("pose_penalty: ", pose_penalty)
 
-        
-
         # --- final cost function ---
-        print("eef_pos_residual_squared: ", eef_pos_residual_squared.sum())
+        # print("eef_pos_residual_squared: ", eef_pos_residual_squared.sum())
         # print("body_xy_residual_squared: ", body_xy_residual_squared.sum())
-        print("free_legs_residual_squared: ", free_legs_residual_squared)
+        # print("free_legs_height_residual_squared: ", free_legs_height_residual_squared)
+        # print("ssm:", ssm_cost)  
+        # print("last_link_perpendicular_residual: ", last_link_perpendicular_residual)
 
-        cost = eef_pos_residual_squared.sum() + free_legs_residual_squared.sum() # + pose_penalty.sum()
+        cost = eef_pos_residual_squared.sum() + free_legs_height_residual_squared.sum() - ssm_cost + last_link_perpendicular_residual.sum() # + pose_penalty.sum()
 
         return cost
 
@@ -250,10 +242,8 @@ def solve_multiple_legs_ik(goal, leg_idxs, legs_on_ground, legs_plane, batch_siz
     print("res.success: ", res.success)
     return res.x
 
-
-
       
-## for visualization
+## variables for visualization
 cmap = colormaps['tab10']
 colors = [cmap(i)[:3] for i in range(NUM_LEGS)]
 colors_name = ["blue", "orange", "green", "red", "purple", "brown"]
@@ -328,25 +318,35 @@ if __name__=='__main__':
     ## --- Visualize initial base and legs pose ---
     # base_trans0, leg_trans = get_transformation_fk(th_0[0].reshape(1,18), batch_size=1)
     # print("base_trans0:\n", base_trans0.detach().numpy())
+    # print("leg_trans_r:\n", leg_trans)
+    # eef_trans = leg_trans[:,:,-1,:,:]
+    # print(f"eef_trans: shape={eef_trans.shape}\n", eef_trans)
+    # print("eef_trans_x_axis", eef_trans[:, :, :3, 0])
     # visualize(base_trans=base_trans0, leg_trans=leg_trans, batch_size=1, goal=None) # base origin = world origin
     
-    # --- main ---
+    # --- SET 1 ---
     # leg_idxs = [0, 1]
     # legs_on_ground = [False, False, True, True, True, True]
-    # pos = torch.tensor([[0.51589,  0.23145, 0.2],
-    #                     [0.51589, -0.23145, 0.2]])
+    # legs_plane = [PLANE2, PLANE2, GROUND_PLANE, GROUND_PLANE, GROUND_PLANE, GROUND_PLANE]
+    # pos = torch.tensor([[0.51589, 0.23145, PLANE2],
+    #                     [0.51589, -0.23145, PLANE2]])
+
+    # --- SET 2 ---
     leg_idxs = [0, 1]
     legs_on_ground = [False, False, True, True, True, True]
-    legs_plane = [PLANE2, PLANE2, GROUND_PLANE, GROUND_PLANE, GROUND_PLANE, GROUND_PLANE]
+    legs_plane = [PLANE2, PLANE2, PLANE1, PLANE1, GROUND_PLANE, GROUND_PLANE]
     pos = torch.tensor([[0.51589, 0.23145, PLANE2],
                         [0.51589, -0.23145, PLANE2]])
+    
+    # --- SET 3 ---
     # leg_idxs = [0, 1, 2, 3, 4, 5]
-    # pos = torch.tensor([[0.5, 0.3, 0], 
-    #                     [0.5, -0.3, 0], 
-    #                     [0.05, .5, 0],
-    #                     [0.05, -.5, 0],
-    #                     [-.45, 0.3, 0],
-    #                     [-.45, -0.3, 0]])
+    # pos = torch.tensor([[0.5, 0.3, PLANE2], 
+    #                     [0.5, -0.3, PLANE2], 
+    #                     [0.05, .5, GROUND_PLANE],
+    #                     [0.05, -.5, GROUND_PLANE],
+    #                     [-.45, 0.3, GROUND_PLANE],
+    #                     [-.45, -0.3, GROUND_PLANE]])
+
     rot = torch.zeros_like(pos)
     goal = pk.Transform3d(pos=pos, rot=rot)
     params = solve_multiple_legs_ik(goal, legs_on_ground=legs_on_ground, legs_plane=legs_plane, leg_idxs=leg_idxs, batch_size=batch_size)
