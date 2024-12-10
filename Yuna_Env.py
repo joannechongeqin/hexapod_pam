@@ -70,8 +70,8 @@ class YunaEnv:
                     jointIndices=self.actuator, 
                     controlMode=p.POSITION_CONTROL, 
                     targetPositions=jointspace_command2bullet,
-                    # forces=self.forces
-                    forces = [60]*18
+                    forces=self.forces
+                    # forces = [60]*18
                     )
                 p.stepSimulation()
                 # reaction_forces = self.get_robot_joint_reaction_forces() # 18 (joints) x 6 (Fx Fy Fz Mx My Mz)
@@ -177,7 +177,7 @@ class YunaEnv:
             self.physicsClient = p.connect(p.DIRECT)
         # physical parameters
         self.gravity = -9.81
-        self.friction = 1.5
+        self.friction = 0.8
         # load ground
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
 

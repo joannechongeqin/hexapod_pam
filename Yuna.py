@@ -4,6 +4,7 @@ import numpy as np
 from functions import transxy, solveFK, rotx
 import time
 
+STEP_HEIGHT = 0.1
 h = 0.12
 eePos = np.array(  [[0.51589,    0.51589,   0.0575,     0.0575,     -0.45839,   -0.45839],
                     [0.23145,   -0.23145,   0.5125,     -0.5125,    0.33105,    -0.33105],
@@ -120,6 +121,24 @@ class Yuna:
             self.step(step_len=0,rotation=0)
             self.is_moving = False
     
+    def swing_leg(self, leg_index, target_pos):
+        '''
+        :param leg_index: The index of the leg to move
+        :param target_pos: The target position of the leg in the world frame
+        '''
+        pos_w0 = self.env.get_leg_pos_in_world_frame().copy()  # initial leg position in world frame
+        target_leg_midpoint = (pos_w0[:, leg_index] + target_pos) / 2  # use xy midpoint
+        target_leg_midpoint[2] = max(pos_w0[2, leg_index], target_pos[2]) + STEP_HEIGHT  # raise
+        pos_w1 = pos_w0.copy()
+        pos_w1[:, leg_index] = target_leg_midpoint
+
+        pos_w2 = pos_w0.copy()
+        pos_w2[:, leg_index] = target_pos
+
+        waypoints = [pos_w1, pos_w2]
+        print("waypoints: ", waypoints)
+        self.move_legs_to_pos_in_world_frame(waypoints)
+
     def move_legs_to_pos_in_body_frame(self, target_pos_arr):
         '''
         target_pos_arr: an array of 3x6 arrays of target leg positions wrt BODY frame
@@ -210,17 +229,31 @@ class Yuna:
             self.move_legs_to_pos_in_body_frame(target_pos_arr)
         return pos_b1
     
-    def trans_body(self, dx, dy, dz, move=False):
+    def trans_body_by(self, dx, dy, dz, move=False):
         move_by_pos_arr = np.array([[-dx] * 6, [-dy] * 6, [-dz] * 6])  
         if move:       
             self.move_legs_by_pos_in_body_frame([move_by_pos_arr])
         return move_by_pos_arr
     
-    def trans_body_in_world_frame(self, dx, dy, dz, move=False):
+    def trans_body_by_in_world_frame(self, dx, dy, dz, move=False):
         move_by_pos_arr = np.array([[-dx] * 6, [-dy] * 6, [-dz] * 6])
         if move:
             self.move_legs_by_pos_in_world_frame([move_by_pos_arr])
         # return
+
+    def trans_body_by_in_world_frame(self, trans_by_arr, move=False):
+        dx, dy, dz = trans_by_arr
+        move_by_pos_arr = np.array([[-dx] * 6, [-dy] * 6, [-dz] * 6])
+        if move:
+            self.move_legs_by_pos_in_world_frame([move_by_pos_arr])
+    
+    def trans_body_to_in_world_frame(self, target_body_pos, move=False):
+        body_pos_w0 = self.env.get_body_pose()[0] # initial body pos in world frame
+        trans_by = target_body_pos - body_pos_w0
+        print("target_body_pos: ", target_body_pos)
+        print("body_pos_w0: ", body_pos_w0)
+        print("trans_by: ", trans_by)
+        self.trans_body_by_in_world_frame(trans_by, move=move)
 
     def rotx_trans_body(self, angle, dx, dy, dz, move=False):
         pos_b0 = self.env.get_leg_pos().copy() # initial leg pos in body frame
