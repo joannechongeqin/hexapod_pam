@@ -25,15 +25,22 @@ torch.set_printoptions(precision=4, sci_mode=False)
 curr_dir = os.path.dirname(os.path.abspath(__file__))
 
 chains = [] # list to store chain for each leg
-# initial [guess] joint angles for robot's legs (base at origin, joints at 90 deg)
+# initial [guess] joint angles for robot's legs
 # 1x18, each group of 3 values represents joint angles for each leg
-th_0 = torch.tensor([0, 0, -PI / 2, 
-                     0, 0, PI / 2, 
-                     0, 0, -PI / 2,
-                     0, 0, PI / 2, 
-                     0, 0, -PI / 2, 
-                     0, 0, PI / 2]*batch_size).reshape((batch_size, 18))
-# TODO: CHANGE THIS TO THE NEUTRAL POSITION IN YUNA_ENV?
+# (base at origin, joints at 90 deg)
+# th_0 = torch.tensor([0, 0, -PI / 2, 
+#                      0, 0, PI / 2, 
+#                      0, 0, -PI / 2,
+#                      0, 0, PI / 2, 
+#                      0, 0, -PI / 2, 
+#                      0, 0, PI / 2]*batch_size).reshape((batch_size, 18))
+# (base at origin, eef at ~0.125m below base, last link perpendicular to ground)
+th_0 = torch.tensor([0, -PI / 10, -PI * 3/5, 
+                     0, PI / 10, PI * 3/5, 
+                     0, -PI / 10, -PI * 3/5, 
+                     0, PI / 10, PI * 3/5, 
+                     0, -PI / 10, -PI * 3/5, 
+                     0, PI / 10, PI * 3/5]*batch_size).reshape((batch_size, 18))
 
 def get_transformation_fk(theta, batch_size=batch_size):
     """
@@ -140,7 +147,7 @@ def check_pose_validity(leg_pos, body_pos, legs_on_ground):
     return True
 
 
-def solve_multiple_legs_ik(goal, leg_idxs, legs_on_ground, legs_plane, batch_size=1):
+def solve_multiple_legs_ik(goal, leg_idxs, legs_on_ground, legs_plane, batch_size=1, coincide_base_and_origin_xy=False):
     """
     Solves the inverse kinematics for multiple legs, optimizing to reach specified goal positions.
 
@@ -239,6 +246,21 @@ def solve_multiple_legs_ik(goal, leg_idxs, legs_on_ground, legs_plane, batch_siz
             last_link_perpendicular_residual.sum()
             # + pose_penalty.sum()
         )
+
+        if coincide_base_and_origin_xy:
+            # TODO: write planner
+            # To find the final optimized pose, we cannot fix the base_xy to the origin:
+            #       to allow the optimizer to try different xy body poses in the world frame,
+            #       enabling it to find a final body pose that can reach the goal.
+            # Once the final optimized pose is determined, a planner will plan the path
+            #       for the hexapod's body based on the initial and final optimized poses.
+            # After the path is planned, for each waypoint, make base_xy coincide
+            #       with that waypoint origin_xy when calculating the remaining leg poses.
+            base_xy_residual = params[:, 18:20] ** 2
+            cost += base_xy_residual.sum()
+            # print("\n--- optimizing based on base xy residual ---")
+            # print(f"base_xy_residual:\n{base_xy_residual}")
+
         return cost
 
     res = minimize(
@@ -253,7 +275,7 @@ def solve_multiple_legs_ik(goal, leg_idxs, legs_on_ground, legs_plane, batch_siz
     logging.debug(f"Optimization successful?:{res.success}")
     return res.x
 
-      
+
 ## variables for visualization
 cmap = colormaps['tab10']
 colors = [cmap(i)[:3] for i in range(NUM_LEGS)]
@@ -325,7 +347,6 @@ def visualize(base_trans, leg_trans, batch_size=batch_size, goal=None):
     
     
 if __name__=='__main__':
-    
     ## --- Visualize initial base and legs pose ---
     # base_trans0, leg_trans0 = get_transformation_fk(th_0[0].reshape(1,18), batch_size=1)
     # eef_trans0 = leg_trans0[:,:,-1,:,:]
@@ -361,7 +382,6 @@ if __name__=='__main__':
     rot = torch.zeros_like(pos)
     goal = pk.Transform3d(pos=pos, rot=rot)
     params = solve_multiple_legs_ik(goal, legs_on_ground=legs_on_ground, legs_plane=legs_plane, leg_idxs=leg_idxs, batch_size=batch_size)
-              
     robot_frame_trans_w, base_trans_w, leg_trans_w, leg_trans_r = get_transformations_from_params(params)
     
     # --- print solutions + visualization ---
