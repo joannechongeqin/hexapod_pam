@@ -263,6 +263,17 @@ class Yuna:
             self.move_legs_by_pos_in_body_frame([move_by_pos_arr])
         return move_by_pos_arr
     
+    def move_to_next_pose(self, next_body_pos_w, next_eef_pos_w):
+        # TODO: leg sequence according to movement direction instead of hard code
+        # TODO: merge trans_body into swing_leg so it move smoothly
+        self.trans_body_to_in_world_frame(np.array(next_body_pos_w), move=True)
+        self.swing_leg(4, next_eef_pos_w[:, 4]) # back leg
+        self.swing_leg(5, next_eef_pos_w[:, 5]) # back leg
+        self.swing_leg(2, next_eef_pos_w[:, 2]) # middle leg
+        self.swing_leg(3, next_eef_pos_w[:, 3]) # middle leg
+        self.swing_leg(0, next_eef_pos_w[:, 0]) # front leg
+        self.swing_leg(1, next_eef_pos_w[:, 1]) # front leg
+
     # def wall_transition_step_ground_leg(self, step_len, leg4_step_half=False, raise_h=0.05):
     #     '''
     #     assuming stepping sideway to left, ground legs are at the right side

@@ -15,7 +15,7 @@ eePos = np.array(  [[0.51589,    0.51589,   0.0575,     0.0575,     -0.45839,   
 class YunaEnv:
     def __init__(self, real_robot_control=True, pybullet_on=True, visualiser=True, camerafollow=False, 
                     eePos=eePos, bodyPos=np.array([0., 0., 0.]), 
-                    fyp_map=True, map_range=10.0, map_resolution=0.1, plot_height_map=True):
+                    fyp_map=True, map_range=10.0, map_resolution=0.1, plot_height_map=False):
         self.real_robot_control = real_robot_control
         self.visualiser = visualiser
         self.camerafollow = camerafollow

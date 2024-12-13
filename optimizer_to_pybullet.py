@@ -25,7 +25,7 @@ pos = torch.tensor([[0.6, 0.3, PLANE2],
 
 rot = torch.zeros_like(pos)
 goal = pk.Transform3d(pos=pos, rot=rot)
-params = solve_multiple_legs_ik(goal, legs_on_ground=legs_on_ground, legs_plane=legs_plane, leg_idxs=leg_idxs, batch_size=batch_size)
+params = solve_multiple_legs_ik(goal, legs_on_ground=legs_on_ground, legs_plane=legs_plane, leg_idxs=leg_idxs, batch_size=batch_size, coincide_base_and_origin_xy=True)
 robot_frame_trans_w, base_trans_w, leg_trans_w, leg_trans_r = get_transformations_from_params(params)
 
 # visualize(base_trans=base_trans_w, leg_trans=leg_trans_w, goal=pos)
@@ -48,14 +48,8 @@ print("initial_eef_pos_r: ", yuna.env.get_leg_pos())
 print("initial_eef_pos_w: ", yuna.env.get_leg_pos_in_world_frame())
 print()
 
-# WRITE A ROUTINE TO MOVE ROBOT FROM INITIAL POSITION TO THE OPTIMIZED POSITION
-yuna.trans_body_to_in_world_frame(np.array(final_body_pos_w), move=True)
-yuna.swing_leg(4, final_eef_pos_w[:, 4]) # back leg
-yuna.swing_leg(5, final_eef_pos_w[:, 5]) # back leg
-yuna.swing_leg(2, final_eef_pos_w[:, 2]) # middle leg
-yuna.swing_leg(3, final_eef_pos_w[:, 3]) # middle leg
-yuna.swing_leg(0, final_eef_pos_w[:, 0]) # front leg
-yuna.swing_leg(1, final_eef_pos_w[:, 1]) # front leg
+# ROUTINE TO MOVE ROBOT FROM INITIAL POSITION TO THE OPTIMIZED POSITION
+yuna.move_to_next_pose(final_body_pos_w, final_eef_pos_w)
 
 print("target_body_pos: ", final_body_pos_w)
 print("target_eef_pos_r: ", final_eef_pos_r)
