@@ -3,6 +3,7 @@ from Yuna_Env import YunaEnv
 import numpy as np
 from functions import transxy, solveFK, rotx
 import time
+from pytorch_optimizer import PamOptimizer
 
 STEP_HEIGHT = 0.1
 h = 0.12
@@ -47,6 +48,8 @@ class Yuna:
         self.is_moving = False # Ture for moving and False for static
         self.smoothing = True # Set to True to enable step smoothing
         self.show_ref_points = show_ref_points # Set to True to show trajectory of legs by plotting reference point in the environment
+
+        self.optimizer = PamOptimizer()
 
     def step(self, *args, **kwargs):
         '''
@@ -263,7 +266,7 @@ class Yuna:
             self.move_legs_by_pos_in_body_frame([move_by_pos_arr])
         return move_by_pos_arr
     
-    def move_to_next_pose(self, next_body_pos_w, next_eef_pos_w):
+    def move_to_next_pose(self, next_body_pos_w, next_eef_pos_w): # next nearest pose
         # TODO: leg sequence according to movement direction instead of hard code
         # TODO: merge trans_body into swing_leg so it move smoothly
         self.trans_body_to_in_world_frame(np.array(next_body_pos_w), move=True)
@@ -273,6 +276,27 @@ class Yuna:
         self.swing_leg(3, next_eef_pos_w[:, 3]) # middle leg
         self.swing_leg(0, next_eef_pos_w[:, 0]) # front leg
         self.swing_leg(1, next_eef_pos_w[:, 1]) # front leg
+
+    def pam(self, pos, rot, legs_on_ground, legs_plane, leg_idxs, batch_size=1):
+
+        final_params = self.optimizer.solve_multiple_legs_ik(pos, rot, legs_on_ground, legs_plane, leg_idxs, batch_size, False)
+        robot_frame_trans_w, base_trans_w, leg_trans_w, leg_trans_r = self.optimizer.get_transformations_from_params(final_params)
+
+        batch_idx = 0
+        final_eef_pos_r = leg_trans_r[batch_idx, :, -1, :3, 3].numpy().T
+        final_body_pos_w = base_trans_w[batch_idx, :3, 3].numpy()
+        final_eef_pos_w = leg_trans_w[batch_idx, :, -1, :3, 3].numpy().T
+        self.move_to_next_pose(final_body_pos_w, final_eef_pos_w)
+
+
+    # TODO: write planner
+            # To find the final optimized pose, we cannot fix the base_xy to the origin:
+            #       to allow the optimizer to try different xy body poses in the world frame,
+            #       enabling it to find a final body pose that can reach the goal.
+            # Once the final optimized pose is determined, a planner will plan the path
+            #       for the hexapod's body based on the initial and final optimized poses.
+            # After the path is planned, for each waypoint, make base_xy coincide
+            #       with that waypoint origin_xy when calculating the remaining leg poses.
 
     # def wall_transition_step_ground_leg(self, step_len, leg4_step_half=False, raise_h=0.05):
     #     '''
