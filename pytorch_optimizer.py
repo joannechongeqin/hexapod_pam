@@ -236,9 +236,17 @@ class PamOptimizer:
             # --- optimize based on free legs' height ---
             # free legs = legs not specified for target goal pos (xyz), but heights are fixed to a specific plane
             free_legs = [i for i in range(self.NUM_LEGS) if i not in leg_idxs]
+            # free_legs_plane = torch.tensor(legs_plane)[free_legs].repeat(self.batch_size, 1)
+
             free_legs_height = all_eef_pos_w[:, free_legs, 2, 3]
-            free_legs_plane = torch.tensor(legs_plane)[free_legs].repeat(self.batch_size, 1)
+            free_legs_xy_pos = all_eef_pos_w[:, :, :2, 3]
+            heights_at_xy_pos_on_map = self.height_map.get_heights_at(free_legs_xy_pos.detach().numpy().reshape(-1, 2))
+            free_legs_plane = torch.tensor(heights_at_xy_pos_on_map.reshape(self.batch_size, -1))[:, free_legs]
             free_legs_height_residual_squared = (free_legs_height - free_legs_plane) ** 2
+            # print("free_legs_xy_pos:", free_legs_xy_pos)
+            # print("heights_at_xy_pos_on_map: ", heights_at_xy_pos_on_map)
+            # print("free_legs_plane: ", free_legs_plane)
+            # print(f"free_legs_height_residual_squared:\n{free_legs_height_residual_squared}")
             logging.debug("\n--- optimizing based on free legs' height ---")
             logging.debug(f"free_legs_height:\n{free_legs_height}")
             logging.debug(f"free_legs_plane:\n{free_legs_plane}")
@@ -253,7 +261,8 @@ class PamOptimizer:
             logging.debug(f"x-axis of eef frame:\n{eef_trans_x_axis_w}")
             logging.debug(f"last_link_perpendicular_residual:\n{last_link_perpendicular_residual}")
 
-            # --- TODO: OPTIMIZE BODY HEIGHTS?
+            # --- TODO: OPTIMIZE BODY HEIGHTS? 
+            # !!! currently sometimes body will collide with next plane level
 
             # --- TODO: check pose validity? ---
             # pose_penalty = torch.tensor([0 if check_pose_validity(leg_pos=all_eef_pos_w[i,:,:3,3], 
@@ -288,7 +297,8 @@ class PamOptimizer:
             max_iter=50,
             disp=2
             )
-        # print("result:\n", res.x)
+        print("result:\n", res.x)
+        print("success?:", res.success)
         logging.debug(f"Optimization successful?:{res.success}")
         return res.x
 
@@ -402,6 +412,7 @@ class PamOptimizer:
         scene.add_geometry(transformed_legs)
         scene.add_geometry(axes)
         scene.show()
+
         
         
 if __name__=='__main__':
@@ -428,12 +439,13 @@ if __name__=='__main__':
     #                     [0.51589, -0.23145, PLANE2]])
 
     # --- SET 2 ---
-    # leg_idxs = [0, 1]
-    # legs_on_ground = [False, False, True, True, True, True]
-    # legs_plane = [PLANE2, PLANE2, PLANE1, PLANE1, GROUND_PLANE, GROUND_PLANE]
-    # pos = torch.tensor([[0.6, 0.3, PLANE2],
-    #                     [0.7, -0.2, PLANE2]])
-    
+    leg_idxs = [0, 1]
+    legs_on_ground = [True, True, True, True, True, True]
+    legs_plane = [PLANE2, PLANE2, PLANE1, PLANE1, GROUND_PLANE, GROUND_PLANE]
+    pos = torch.tensor([[1.5, 0.3, PLANE2],
+                        [1.5, -0.2, PLANE2]])
+    rot = torch.zeros_like(pos)
+
     # --- SET 3 ---
     # leg_idxs = [0, 1, 2, 3, 4, 5]
     # pos = torch.tensor([[0.5, 0.3, PLANE2], 
@@ -452,12 +464,12 @@ if __name__=='__main__':
     # rot = torch.zeros_like(pos)
     
     # --- SET 5 --- free all legs, fix body
-    leg_idxs = []
-    legs_on_ground = [True] * 6
-    legs_plane = [GROUND_PLANE] * 6
-    pos = torch.tensor([])
-    rot = torch.zeros_like(pos)
-    params = optimizer.solve_multiple_legs_ik(pos, rot, legs_on_ground=legs_on_ground, legs_plane=legs_plane, leg_idxs=leg_idxs, has_base_goal=True, target_base_xy=torch.tensor([0., 0.5]))
+    # leg_idxs = []
+    # legs_on_ground = [True] * 6
+    # legs_plane = [GROUND_PLANE] * 6
+    # pos = torch.tensor([])
+    # rot = torch.zeros_like(pos)
+    params = optimizer.solve_multiple_legs_ik(pos, rot, legs_on_ground=legs_on_ground, legs_plane=legs_plane, leg_idxs=leg_idxs, has_base_goal=True, target_base_xy=torch.tensor([0.1, 0.]))
     
     # params = optimizer.solve_multiple_legs_ik(pos, rot, legs_on_ground=legs_on_ground, legs_plane=legs_plane, leg_idxs=leg_idxs)
     robot_frame_trans_w, base_trans_w, leg_trans_w, leg_trans_r = optimizer.get_transformations_from_params(params)

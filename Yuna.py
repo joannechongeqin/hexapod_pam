@@ -19,11 +19,11 @@ eePos0_opt = np.array( [[ 0.4901,  0.4900,  0.0426,  0.0424, -0.4475, -0.4476],
 
 class Yuna:
     def __init__(self, visualiser=True, camerafollow=True, real_robot_control=False, pybullet_on=True, show_ref_points=False, 
-                    eePos=eePos0_opt, bodyPos=np.array([0., 0., 0.]), batch_size=1, opt_vis=False):
+                    eePos=eePos0_opt, bodyPos=np.array([0., 0., 0.]), batch_size=1, opt_vis=False, goal=[]):
         # NOTE: bodyPos in world frame, eePos in body frame
         # initialise the environment
         self.env = YunaEnv(visualiser=visualiser, camerafollow=camerafollow, real_robot_control=real_robot_control, pybullet_on=pybullet_on, 
-                                eePos=eePos, bodyPos=bodyPos)
+                                eePos=eePos, bodyPos=bodyPos, goal=goal)
         self.bodyPos = self.env.bodyPos.copy() # initial robot body position in world frame
         self.eePos = self.env.eePos.copy() # initial robot leg end-effecter position w.r.t body frame
         self.eeAng = np.array([0., 0., 0., 0., 0., 0.,]) # the deviation of each leg from neutral position, use 0. to initiate a float type array
@@ -149,7 +149,7 @@ class Yuna:
         pos_w2[:, leg_index] = target_pos
 
         waypoints = [pos_w1, pos_w2]
-        print("waypoints: ", waypoints)
+        # print("waypoints: ", waypoints)
         self.move_legs_to_pos_in_world_frame(waypoints)
 
     def move_legs_to_pos_in_body_frame(self, target_pos_arr):
@@ -169,7 +169,7 @@ class Yuna:
                 self.env.add_ref_points_wrt_body_frame(traj_point)
                 self.env.add_body_frame_ref_point()
             counter += 1
-        print("num of traj points: ", counter) 
+        # print("num of traj points: ", counter) 
     
     def move_legs_to_pos_in_world_frame(self, target_pos_arr):
         '''
@@ -263,9 +263,9 @@ class Yuna:
     def trans_body_to_in_world_frame(self, target_body_pos, move=False):
         body_pos_w0 = self.env.get_body_pose()[0] # initial body pos in world frame
         trans_by = target_body_pos - body_pos_w0
-        print("target_body_pos: ", target_body_pos)
-        print("body_pos_w0: ", body_pos_w0)
-        print("trans_by: ", trans_by)
+        # print("target_body_pos: ", target_body_pos)
+        # print("body_pos_w0: ", body_pos_w0)
+        # print("trans_by: ", trans_by)
         self.trans_body_by_in_world_frame(trans_by, move=move)
 
     def rotx_trans_body(self, angle, dx, dy, dz, move=False):
@@ -279,18 +279,20 @@ class Yuna:
     def move_to_next_pose(self, next_body_pos_w, next_eef_pos_w): # next nearest pose
         # TODO: leg sequence according to movement direction instead of hard code
         # TODO: merge trans_body into swing_leg so it move smoothly
+        # TODO: fix potential self collision
+        num_legs = 6
+        leg_sequence = [4, 5, 2, 3, 0, 1] # back then middle then front
         self.trans_body_to_in_world_frame(np.array(next_body_pos_w), move=True)
-        self.swing_leg(4, next_eef_pos_w[:, 4]) # back leg
-        self.swing_leg(5, next_eef_pos_w[:, 5]) # back leg
-        self.swing_leg(2, next_eef_pos_w[:, 2]) # middle leg
-        self.swing_leg(3, next_eef_pos_w[:, 3]) # middle leg
-        self.swing_leg(0, next_eef_pos_w[:, 0]) # front leg
-        self.swing_leg(1, next_eef_pos_w[:, 1]) # front leg
+        for i in range(num_legs):
+            leg_idx = leg_sequence[i]
+            self.swing_leg(leg_idx, next_eef_pos_w[:, leg_idx])
 
     def pam(self, pos, rot, legs_on_ground, legs_plane, leg_idxs, batch_idx=0):
-        
+        initial_body_pos = self.env.get_body_pose()[0] # initial body pos in world frame
+
         final_params = self.optimizer.solve_multiple_legs_ik(pos, rot, legs_on_ground, legs_plane, leg_idxs, False)
         _, final_base_trans_w, final_leg_trans_w, _ = self.optimizer.get_transformations_from_params(final_params)
+        print("final pose found successfully.")
 
         if batch_idx >= self.batch_size:
             print("Error: batch_idx should be less than batch_size. Using batch_idx = 0.")
@@ -300,47 +302,46 @@ class Yuna:
         final_eef_pos_w = final_leg_trans_w[batch_idx, :, -1, :3, 3].numpy().T
         # print("Final body pos in world frame: ", final_body_pos_w)
         # print("final eef pos in world frame: ", final_eef_pos_w)
-    
+        if self.opt_vis:
+            self.optimizer.visualize(base_trans=final_base_trans_w, leg_trans=final_leg_trans_w, goal=pos)
+        
         # Planner
-            # To find the final optimized pose, we cannot fix the base_xy to the origin:
+            # To find the final optimized pose, we cannot fix the base_xy:
             #       to allow the optimizer to try different xy body poses in the world frame,
-            #       enabling it to find a final body pose that can reach the goal.
+            #       for it to find a final body pose that can reach the goal.
             # Once the final optimized pose is determined, a planner will plan the path
             #       for the hexapod's body based on the initial and final optimized poses.
             # After the path is planned, for each waypoint, make base_xy coincide
             #       with that waypoint origin_xy when calculating the remaining leg poses.
         
         # check distance between intial and final optimized body pose
-        dist = np.linalg.norm(final_body_pos_w - self.bodyPos)
+        dist = np.linalg.norm(final_body_pos_w - initial_body_pos)
         print("Distance between initial and final body pose: ", dist)
 
         # interpolate between initial and final optimized body pose
         num_of_waypoints = round(dist / self.body_interval)
         print("Number of waypoints: ", num_of_waypoints)
 
-        if num_of_waypoints == 0:
+        if num_of_waypoints <= 1:
             self.move_to_next_pose(final_body_pos_w, final_eef_pos_w)
             return
 
         body_waypoints = []
         legs_waypoints = []
 
-        # for path visualization
-        if self.opt_vis:  
-            base_trans_w_arr = []
-            leg_trans_w_arr = []
 
         for i in range(1, num_of_waypoints):
             # linear interpolation between initial and final optimized body pose
-            body_waypoint = self.bodyPos + i * (final_body_pos_w - self.bodyPos) / num_of_waypoints
+            body_waypoint = initial_body_pos + i * (final_body_pos_w - initial_body_pos) / num_of_waypoints
             # print(f"Body waypoint {i}: {body_waypoint}")
             
             leg_idxs = []
             legs_on_ground = [True] * 6
-            legs_plane = [GROUND_PLANE] * 6
+            legs_plane = [GROUND_PLANE] * 6 # TODO: actually dont need to pass this in alr since optimzer got map
             temp_pos = torch.tensor([])
             temp_rot = torch.zeros_like(temp_pos)
             
+            print(f"--- Solving for waypoint {i} ---")
             next_params = self.optimizer.solve_multiple_legs_ik(pos=temp_pos, rot=temp_rot, legs_on_ground=legs_on_ground, legs_plane=legs_plane, leg_idxs=leg_idxs, has_base_goal=True, target_base_xy=torch.tensor(body_waypoint[:2]))
             _, next_base_trans_w, next_leg_trans_w, _ = self.optimizer.get_transformations_from_params(next_params)
             next_body_pos_w = next_base_trans_w[batch_idx, :3, 3].numpy()
@@ -350,28 +351,18 @@ class Yuna:
             body_waypoints.append(next_body_pos_w)
             legs_waypoints.append(next_eef_pos_w)
             
-            if self.opt_vis:
-                base_trans_w_arr.append(next_base_trans_w[batch_idx])
-                leg_trans_w_arr.append(next_leg_trans_w[batch_idx])
-                # self.optimizer.visualize(base_trans=next_base_trans_w, leg_trans=next_leg_trans_w, goal=pos)
-
         body_waypoints.append(final_body_pos_w)
         legs_waypoints.append(final_eef_pos_w)
         print("body waypoints: ", body_waypoints)
         print("legs waypoints: ", legs_waypoints)
-        if self.opt_vis:
-            base_trans_w_arr.append(final_base_trans_w[batch_idx])
-            leg_trans_w_arr.append(final_leg_trans_w[batch_idx])
-            # self.optimizer.visualize(base_trans=base_trans_w_arr, leg_trans=leg_trans_w_arr, visualize_path=True, goal=pos)
-
-        self._plot_hexapod(body_waypoints, legs_waypoints)
+        
+        self._plot_hexapod_path(body_waypoints, legs_waypoints)
 
         for i in range(num_of_waypoints):
             # TODO: fix move_to_next_pose such that body pose slowly move as each leg move
             self.move_to_next_pose(body_waypoints[i], legs_waypoints[i])
 
-
-    def _plot_hexapod(self, body_waypoints, legs_waypoints):
+    def _plot_hexapod_path(self, body_waypoints, legs_waypoints):
         cmap = plt.get_cmap('tab10')
         num_points = len(body_waypoints)
 
@@ -384,7 +375,7 @@ class Yuna:
             color = cmap(i / num_points)
             
             # Plot body waypoint
-            ax.scatter(body_wp[0], body_wp[1], body_wp[2], c=[color], marker='o')
+            ax.scatter(body_wp[0], body_wp[1], body_wp[2], c=[color], marker='o', label=f'Waypoint {i+1}')
             
             # Plot leg waypoints
             for j in range(leg_waypoints.shape[1]):
@@ -392,7 +383,6 @@ class Yuna:
                 ax.plot([body_wp[0], leg_waypoints[0, j]],
                         [body_wp[1], leg_waypoints[1, j]],
                         [body_wp[2], leg_waypoints[2, j]], color=color, linestyle='--')
-                
             # Draw hexagon connecting the leg waypoints in the specified sequence
             sequence = [0, 1, 3, 5, 4, 2, 0]  # Indices for legs 1, 2, 4, 6, 5, 3
             for k in range(len(sequence) - 1):

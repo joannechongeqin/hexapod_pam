@@ -50,6 +50,9 @@ class Map:
         x_idx = int((y + self.map_range) / self.map_resolution)
         # print(f"getting height at ({x}, {y}) idx ({x_idx}, {y_idx}) = {self.height_map[x_idx, y_idx]}")
         return self.height_map[x_idx, y_idx]
+    
+    def get_heights_at(self, arr_of_xy):
+        return np.array([self.get_height_at(x, y) for x, y in arr_of_xy])
         
     def plot(self):
         plt.figure(figsize=(10, 7))
@@ -64,7 +67,7 @@ class Map:
 class YunaEnv:
     def __init__(self, real_robot_control=True, pybullet_on=True, visualiser=True, camerafollow=False, 
                     eePos=eePos, bodyPos=np.array([0., 0., 0.]), 
-                    fyp_map_on=False, map_range=10.0, map_resolution=0.05):
+                    fyp_map_on=True, map_range=10.0, map_resolution=0.05, goal=[]):
         self.real_robot_control = real_robot_control
         self.visualiser = visualiser
         self.camerafollow = camerafollow
@@ -80,6 +83,7 @@ class YunaEnv:
         self.bodyPos = bodyPos.copy()
 
         self.fyp_map_on = fyp_map_on
+        self.goal = goal
         self.map_range = map_range
         self.map_resolution = map_resolution
 
@@ -261,7 +265,10 @@ class YunaEnv:
             self.groundID = p.loadURDF('plane.urdf')
 
         if self.fyp_map_on:
-            self.load_rectangular_body([1.5, 0, 0], [0.8, 1.5, 0.2])
+            self.load_rectangular_body([1.5, 0, 0], [0.8, 1., 0.1])
+            if len(self.goal) > 0:
+                for point in self.goal:
+                    p.addUserDebugPoints(pointPositions=self.goal, pointColorsRGB=[[0.5, 0.5, 0.5]], pointSize=10, lifeTime=0) # TODO: make this to accept an array of goal
 
         p.setGravity(0, 0, self.gravity)
         p.changeDynamics(self.groundID, -1, lateralFriction=self.friction)
