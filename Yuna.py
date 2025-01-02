@@ -281,18 +281,22 @@ class Yuna:
         # TODO: merge trans_body into swing_leg so it move smoothly
         # TODO: fix potential self collision
         num_legs = 6
-        leg_sequence = [4, 5, 2, 3, 0, 1] # back then middle then front
-        self.trans_body_to_in_world_frame(np.array(next_body_pos_w), move=True)
+        leg_sequence = [4, 5, 2, 3, 0, 1] # back then middle then front, left then r
+        initial_body_pos_w = self.env.get_body_pose()[0]
+        # self.trans_body_to_in_world_frame(np.array(next_body_pos_w), move=True)
         for i in range(num_legs):
+            if i % 2 == 0: # i = 0, 2, 4 (first, third, fifth legs)
+                intermediate_body_pos_w = initial_body_pos_w + (i/2 + 1) * (next_body_pos_w - initial_body_pos_w) / 3
+                self.trans_body_to_in_world_frame(np.array(intermediate_body_pos_w), move=True)            
             leg_idx = leg_sequence[i]
             self.swing_leg(leg_idx, next_eef_pos_w[:, leg_idx])
 
-    def pam(self, pos, rot, legs_on_ground, legs_plane, leg_idxs, batch_idx=0):
+    def pam(self, pos, rot, legs_on_ground, leg_idxs, batch_idx=0):
         initial_body_pos = self.env.get_body_pose()[0] # initial body pos in world frame
 
-        final_params = self.optimizer.solve_multiple_legs_ik(pos, rot, legs_on_ground, legs_plane, leg_idxs, False)
+        final_params = self.optimizer.solve_multiple_legs_ik(pos, rot, legs_on_ground, leg_idxs, False)
         _, final_base_trans_w, final_leg_trans_w, _ = self.optimizer.get_transformations_from_params(final_params)
-        print("final pose found successfully.")
+        print("final pose found.")
 
         if batch_idx >= self.batch_size:
             print("Error: batch_idx should be less than batch_size. Using batch_idx = 0.")
@@ -337,12 +341,11 @@ class Yuna:
             
             leg_idxs = []
             legs_on_ground = [True] * 6
-            legs_plane = [GROUND_PLANE] * 6 # TODO: actually dont need to pass this in alr since optimzer got map
             temp_pos = torch.tensor([])
             temp_rot = torch.zeros_like(temp_pos)
             
             print(f"--- Solving for waypoint {i} ---")
-            next_params = self.optimizer.solve_multiple_legs_ik(pos=temp_pos, rot=temp_rot, legs_on_ground=legs_on_ground, legs_plane=legs_plane, leg_idxs=leg_idxs, has_base_goal=True, target_base_xy=torch.tensor(body_waypoint[:2]))
+            next_params = self.optimizer.solve_multiple_legs_ik(pos=temp_pos, rot=temp_rot, legs_on_ground=legs_on_ground, leg_idxs=leg_idxs, has_base_goal=True, target_base_xy=torch.tensor(body_waypoint[:2]))
             _, next_base_trans_w, next_leg_trans_w, _ = self.optimizer.get_transformations_from_params(next_params)
             next_body_pos_w = next_base_trans_w[batch_idx, :3, 3].numpy()
             next_eef_pos_w = next_leg_trans_w[batch_idx, :, -1, :3, 3].numpy().T
