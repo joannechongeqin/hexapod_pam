@@ -12,10 +12,59 @@ h = 0.12
 eePos = np.array(  [[0.51589,    0.51589,   0.0575,     0.0575,     -0.45839,   -0.45839],
                     [0.23145,   -0.23145,   0.5125,     -0.5125,    0.33105,    -0.33105],
                     [   -h,         -h,         -h,         -h,         -h,         -h]])
+
+class Map:
+    def __init__(self, map_range=10.0, map_resolution=0.05, pybullet_on=False):
+        self.map_range = map_range
+        self.map_resolution = map_resolution
+        self.pybullet_on = pybullet_on
+        self.height_map = self._generate_height_map()
+
+    def _generate_height_map(self):
+        x_coords = np.arange(-self.map_range, self.map_range, self.map_resolution)
+        y_coords = np.arange(-self.map_range, self.map_range, self.map_resolution)
+        x_grid, y_grid = np.meshgrid(x_coords, y_coords)
+        x_grid = np.round(x_grid, 3)
+        y_grid = np.round(y_grid, 3)
+
+        height_map = np.zeros_like(x_grid)
+        for i in range(x_grid.shape[0]):
+            for j in range(x_grid.shape[1]):
+                x, y = x_grid[i, j], y_grid[i, j]
+                ray_start = [x, y, 10]  # ray starts at 10m above ground
+                ray_end = [x, y, -10]   # ray ends at 10m below ground
+
+                if self.pybullet_on:
+                    ray_result = p.rayTest(ray_start, ray_end)
+                    if ray_result[0][0] != -1 and ray_result[0][3][2] > 1e-6:  # if ray hits something
+                            height_map[i, j] = ray_result[0][3][2]  # z-coordinate of the hit point
+                            # print(f"Ray hit at ({x}, {y}) idx ({i}, {j}) with height {height_map[i, j]}")
+                else:
+                    height_map[i, j] = 0.0
+
+        return height_map
+    
+    def get_height_at(self, x, y):
+        # note currently rounding up, maybe can round to nearest cell?
+        y_idx = int((x + self.map_range) / self.map_resolution)
+        x_idx = int((y + self.map_range) / self.map_resolution)
+        # print(f"getting height at ({x}, {y}) idx ({x_idx}, {y_idx}) = {self.height_map[x_idx, y_idx]}")
+        return self.height_map[x_idx, y_idx]
+        
+    def plot(self):
+        plt.figure(figsize=(10, 7))
+        plt.imshow(self.height_map, extent=(-self.map_range, self.map_range, -self.map_range, self.map_range), origin='lower', cmap='viridis')
+        plt.colorbar(label='Height')
+        plt.xlabel("X")
+        plt.ylabel("Y")
+        plt.title("Height Map")
+        plt.grid(True)
+        plt.show()
+
 class YunaEnv:
     def __init__(self, real_robot_control=True, pybullet_on=True, visualiser=True, camerafollow=False, 
                     eePos=eePos, bodyPos=np.array([0., 0., 0.]), 
-                    fyp_map=True, map_range=10.0, map_resolution=0.1, plot_height_map=False):
+                    fyp_map_on=False, map_range=10.0, map_resolution=0.05):
         self.real_robot_control = real_robot_control
         self.visualiser = visualiser
         self.camerafollow = camerafollow
@@ -30,45 +79,13 @@ class YunaEnv:
         self.eePos = eePos.copy() # neutral position for the robot
         self.bodyPos = bodyPos.copy()
 
-        self.fyp_map = fyp_map
+        self.fyp_map_on = fyp_map_on
         self.map_range = map_range
         self.map_resolution = map_resolution
-        self.plot_height_map = plot_height_map
 
         if self.pybullet_on:
             self._load_env()
         self._init_robot()
-        
-        if self.plot_height_map:
-            self._plot_height_map()
-
-    def _generate_height_map(self):
-        x_coords = np.arange(-self.map_range, self.map_range, self.map_resolution)
-        y_coords = np.arange(-self.map_range, self.map_range, self.map_resolution)
-        x_grid, y_grid = np.meshgrid(x_coords, y_coords)
-
-        height_map = np.zeros_like(x_grid)
-        for i in range(x_grid.shape[0]):
-            for j in range(x_grid.shape[1]):
-                x, y = x_grid[i, j], y_grid[i, j]
-                ray_start = [x, y, 10]  # ray starts at 10m above ground
-                ray_end = [x, y, -10]   # ray ends at 10m below ground
-
-                ray_result = p.rayTest(ray_start, ray_end)
-                if ray_result[0][0] != -1:  # if ray hits something
-                    height_map[i, j] = ray_result[0][3][2]  # z-coordinate of the hit point
-            
-        return height_map
-        
-    def _plot_height_map(self):
-        plt.figure(figsize=(10, 7))
-        plt.imshow(self.height_map, extent=(-self.map_range, self.map_range, -self.map_range, self.map_range), origin='lower', cmap='viridis')
-        plt.colorbar(label='Height')
-        plt.xlabel("X")
-        plt.ylabel("Y")
-        plt.title("Height Map")
-        plt.grid(True)
-        plt.show()
 
     def step(self, targetPositions, iteration=1, sleep='auto'):
         '''
@@ -243,13 +260,13 @@ class YunaEnv:
         else:
             self.groundID = p.loadURDF('plane.urdf')
 
-        if self.fyp_map:
-            self.load_rectangular_body([2.5, 0, 0], [0.8, 1.5, 0.3])
+        if self.fyp_map_on:
+            self.load_rectangular_body([1.5, 0, 0], [0.8, 1.5, 0.2])
 
         p.setGravity(0, 0, self.gravity)
         p.changeDynamics(self.groundID, -1, lateralFriction=self.friction)
 
-        self.height_map = self._generate_height_map()
+        self.height_map = Map(map_range=self.map_range, map_resolution=self.map_resolution, pybullet_on=self.pybullet_on) # generate a 2.5D height map for the environment
 
         # load Yuna robot
         # Yuna_init_pos = [0,0,0.5]
@@ -414,5 +431,9 @@ class YunaEnv:
 if __name__=='__main__':
     # test code
     yunaenv = YunaEnv(real_robot_control=0)
+    
+    height_map = yunaenv.height_map
+    height_map.plot()
+
     time.sleep(3)
     yunaenv.close()

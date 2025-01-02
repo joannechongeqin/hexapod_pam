@@ -30,7 +30,7 @@ pos = torch.tensor([[0.6, 0.3, PLANE2],
 rot = torch.zeros_like(pos)
 
 optimizer = PamOptimizer()
-params = optimizer.solve_multiple_legs_ik(pos, rot, legs_on_ground=legs_on_ground, legs_plane=legs_plane, leg_idxs=leg_idxs)
+params = optimizer.solve_multiple_legs_ik(pos=pos, rot=rot, legs_on_ground=legs_on_ground, legs_plane=legs_plane, leg_idxs=leg_idxs)
 robot_frame_trans_w, base_trans_w, leg_trans_w, leg_trans_r = optimizer.get_transformations_from_params(params)
  
 # optimizer.visualize(base_trans=base_trans_w, leg_trans=leg_trans_w, goal=pos)

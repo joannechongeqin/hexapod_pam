@@ -9,13 +9,14 @@ from torchmin import minimize
 import numpy as np
 from static_stability_margin import convex_hull_pam, static_stability_margin, point_in_hull
 import logging
+from Yuna_Env import Map
 
 logging.basicConfig(level=logging.INFO, format='%(message)s') # format='%(asctime)s - %(levelname)s - %(message)s
 np.set_printoptions(precision=4, suppress=True)
 torch.set_printoptions(precision=4, sci_mode=False)
 
 class PamOptimizer:
-    def __init__(self, batch_size=1, vis=False):
+    def __init__(self, height_map=Map(), batch_size=1, vis=False):
         self.chains = [] # list to store chain for each leg
         self.PI = math.pi
         self.NUM_LEGS = 6
@@ -23,6 +24,7 @@ class PamOptimizer:
         self.batch_size = batch_size
         self.vis = vis
         self.curr_dir = os.path.dirname(os.path.abspath(__file__))
+        self.height_map = height_map
 
         # initial [guess] joint angles for robot's legs
         # 1x18, each group of 3 values represents joint angles for each leg
@@ -161,7 +163,7 @@ class PamOptimizer:
     #     return True
 
 
-    def solve_multiple_legs_ik(self, pos, rot, leg_idxs, legs_on_ground, legs_plane, coincide_base_and_origin_xy=False):
+    def solve_multiple_legs_ik(self, pos, rot, leg_idxs, legs_on_ground, legs_plane, has_base_goal = False, target_base_xy = np.zeros(3)):
         """
         Solves the inverse kinematics for multiple legs, optimizing to reach specified goal positions.
 
@@ -176,8 +178,12 @@ class PamOptimizer:
                                     Shape: [batch_size, 21], where the first 18 values are joint angles, 
                                     and the remaining 3 are base parameters (x,y,z) in world frame. 
         """
-        goal = pk.Transform3d(pos=pos, rot=rot)
-        assert goal.get_matrix().shape[0] == len(leg_idxs)
+        if len(pos) != 0:
+            has_eef_goal = True
+            goal = pk.Transform3d(pos=pos, rot=rot)
+            assert goal.get_matrix().shape[0] == len(leg_idxs)
+        else:
+            has_eef_goal = False
         
         # generate random initial guess for optimization
         theta = self.th_0 # torch.rand(batch_size, 18) # joint angles
@@ -199,23 +205,14 @@ class PamOptimizer:
 
             all_eef_pos_w = torch.einsum("bkl,bilm->bikm",rob_tf_w.get_matrix(),eef_trans_r)
             target_eef_pos_w = all_eef_pos_w[:,leg_idxs,:3,3] # extract pos (xyz) of end-effectors
-            eef_pos_residual_squared = (target_eef_pos_w - goal.get_matrix()[:,:3,3].unsqueeze(0))**2 # calculate squared diff between eef pos and goal pos
-            logging.debug("\n--- optimizing based on distance between eef pos and goal pos ---")
-            # print(f"all_eef_pos_w: {all_eef_pos_w}")
-            logging.debug(f"eef_pos:\n{target_eef_pos_w}")
-            logging.debug(f"goal_pos:\n{goal.get_matrix()[:,:3,3]}")
-            logging.debug(f"eef_pos_residual_squared:\n{eef_pos_residual_squared}")
-
-            # --- optimize based on free legs' height ---
-            # free legs = legs not specified for target goal pos (xyz), but heights are fixed to a specific plane
-            free_legs = [i for i in range(self.NUM_LEGS) if i not in leg_idxs]
-            free_legs_height = all_eef_pos_w[:, free_legs, 2, 3]
-            free_legs_plane = torch.tensor(legs_plane)[free_legs].repeat(self.batch_size, 1)
-            free_legs_height_residual_squared = (free_legs_height - free_legs_plane) ** 2
-            logging.debug("\n--- optimizing based on free legs' height ---")
-            logging.debug(f"free_legs_height:\n{free_legs_height}")
-            logging.debug(f"free_legs_plane:\n{free_legs_plane}")
-            logging.debug(f"free_legs_height_residual_squared:\n{free_legs_height_residual_squared}")
+            
+            if has_eef_goal:
+                eef_pos_residual_squared = (target_eef_pos_w - goal.get_matrix()[:,:3,3].unsqueeze(0))**2 # calculate squared diff between eef pos and goal pos
+                logging.debug("\n--- optimizing based on distance between eef pos and goal pos ---")
+                # print(f"all_eef_pos_w: {all_eef_pos_w}")
+                logging.debug(f"eef_pos:\n{target_eef_pos_w}")
+                logging.debug(f"goal_pos:\n{goal.get_matrix()[:,:3,3]}")
+                logging.debug(f"eef_pos_residual_squared:\n{eef_pos_residual_squared}")
 
             # --- optimize based on static stability margin (min dist from the CoM to the edges of support polygon) ---
             # project all points to a ground plane and draw support polygon using legs on ground
@@ -236,6 +233,17 @@ class PamOptimizer:
                     ssm_cost -= 1e6  # Apply penalty for points outside the polygon
                     logging.warning("body xy not within support polygon")
 
+            # --- optimize based on free legs' height ---
+            # free legs = legs not specified for target goal pos (xyz), but heights are fixed to a specific plane
+            free_legs = [i for i in range(self.NUM_LEGS) if i not in leg_idxs]
+            free_legs_height = all_eef_pos_w[:, free_legs, 2, 3]
+            free_legs_plane = torch.tensor(legs_plane)[free_legs].repeat(self.batch_size, 1)
+            free_legs_height_residual_squared = (free_legs_height - free_legs_plane) ** 2
+            logging.debug("\n--- optimizing based on free legs' height ---")
+            logging.debug(f"free_legs_height:\n{free_legs_height}")
+            logging.debug(f"free_legs_plane:\n{free_legs_plane}")
+            logging.debug(f"free_legs_height_residual_squared:\n{free_legs_height_residual_squared}")
+
             # --- optimize such that last link of supported legs is as perpendicular to ground as possible ---
             # when last link perpendicular to ground, x-axis of eef frame (pointing down) parallel to z-axis of world frame (pointing up)
             eef_trans_x_axis_w = all_eef_pos_w[:, eef_support_idxs, :3, 0] # extract x-axis of eef frame
@@ -255,15 +263,17 @@ class PamOptimizer:
 
             # --- final cost function ---
             cost = (
-                eef_pos_residual_squared.sum() +
                 free_legs_height_residual_squared.sum() -
                 ssm_cost.mean() +
                 last_link_perpendicular_residual.sum()
                 # + pose_penalty.sum()
             )
 
-            if coincide_base_and_origin_xy:
-                base_xy_residual = params[:, 18:20] ** 2
+            if has_eef_goal:
+                cost += eef_pos_residual_squared.sum()
+
+            if has_base_goal:
+                base_xy_residual = (params[:, 18:20] - target_base_xy) ** 2
                 cost += base_xy_residual.sum()
                 # print("\n--- optimizing based on base xy residual ---")
                 # print(f"base_xy_residual:\n{base_xy_residual}")
@@ -283,7 +293,17 @@ class PamOptimizer:
         return res.x
 
 
-    def visualize(self, base_trans, leg_trans, goal=None):
+    def visualize(self, base_trans, leg_trans, visualize_path=False, goal=None):
+        # If visualize_path is False:
+        #   - base_trans and leg_trans = multiple distinct solutions for the same goal.
+        #   - each element in base_trans and leg_trans = to a different solution in the batch.
+        #   - for comparing different possible configurations that achieve the same end-effector positions.
+
+        # If visualize_path is True:
+        #   - base_trans and leg_trans = a sequence of waypoints for a single chosen solution.
+        #   - each element in base_trans and leg_trans corresponds to a different waypoint along the path to reach the final goal.
+        #   - for visualizing movement of robot through a planned path.
+
         if self.vis == False:
             self.vis = True
             self._load_vis_var()
@@ -302,43 +322,80 @@ class PamOptimizer:
         ground_plane = trimesh.Trimesh(vertices=vertices, faces=faces)
         ground_plane.visual.face_colors = [0.5, 0.7, 1.0, 0.5]
 
-        for k in range(self.batch_size):
-            trans_dist = k * spacing
-            translation = np.array([trans_dist, 0, 0])  # translate to place robot side by side
-            
-            # Add world origin axes
-            axis_length = .5
-            x_axis = trimesh.load_path([[trans_dist, 0, 0], [trans_dist + axis_length, 0, 0]])
-            y_axis = trimesh.load_path([[trans_dist, 0, 0], [trans_dist, axis_length, 0]])
-            z_axis = trimesh.load_path([[trans_dist, 0, 0], [trans_dist, 0, axis_length]])
-            x_axis.colors  = [[255, 0, 0, 255] * len(x_axis.entities)]
-            y_axis.colors  = [[0, 255, 0, 255] * len(x_axis.entities)]
-            z_axis.colors  = [[0, 0, 255, 255] * len(x_axis.entities)]
-            axes.extend([x_axis, y_axis, z_axis])
+        if visualize_path:
+            for k in range(len(base_trans)):
+                # Add world origin axes
+                axis_length = .5
+                x_axis = trimesh.load_path([[0, 0, 0], [axis_length, 0, 0]])
+                y_axis = trimesh.load_path([[0, 0, 0], [0, axis_length, 0]])
+                z_axis = trimesh.load_path([[0, 0, 0], [0, 0, axis_length]])
+                x_axis.colors  = [[255, 0, 0, 255] * len(x_axis.entities)]
+                y_axis.colors  = [[0, 255, 0, 255] * len(x_axis.entities)]
+                z_axis.colors  = [[0, 0, 255, 255] * len(x_axis.entities)]
+                axes.extend([x_axis, y_axis, z_axis])
 
-            transformed_base = self.mesh_base.copy()
-            transformed_base.apply_transform(base_trans[k].detach().numpy())
-            transformed_base.apply_translation(translation)
-            transformed_bases.append(transformed_base)
+                transformed_base = self.mesh_base.copy()
+                transformed_base.apply_transform(base_trans[k].detach().numpy())
+                transformed_bases.append(transformed_base)
 
-            for i in range(self.NUM_LEGS):
-                leg_meshes = self.meshes_left if i % 2 == 0 else self.meshes_right
-                leg_transforms = leg_trans[k, i]
-                color = self.colors[i]
+                for i in range(self.NUM_LEGS):
+                    leg_meshes = self.meshes_left if i % 2 == 0 else self.meshes_right
+                    leg_transforms = leg_trans[k][i]
+                    color = self.colors[i]
 
-                for j, mesh in enumerate(leg_meshes):
-                    transformed_mesh = mesh.copy()
-                    transformed_mesh.apply_transform(leg_transforms[j].detach().numpy())
-                    transformed_mesh.apply_translation(translation)
-                    transformed_mesh.visual.face_colors = [color] * len(transformed_mesh.faces)
-                    transformed_legs.append(transformed_mesh)
+                    for j, mesh in enumerate(leg_meshes):
+                        transformed_mesh = mesh.copy()
+                        transformed_mesh.apply_transform(leg_transforms[j].detach().numpy())
+                        transformed_mesh.visual.face_colors = [color] * len(transformed_mesh.faces)
+                        transformed_legs.append(transformed_mesh)
 
-            if goal is not None:
-                points = goal.numpy().reshape(-1, 3)
-                spheres = [trimesh.creation.icosphere(radius=0.03).apply_translation(translation + point) for point in points]
-                for sphere in spheres:
-                    sphere.visual.face_colors = [255, 0, 0, 200]
-                scene.add_geometry(spheres)
+                if goal is not None:
+                    points = goal.numpy().reshape(-1, 3)
+                    spheres = [trimesh.creation.icosphere(radius=0.03).apply_translation(point) for point in points]
+                    for sphere in spheres:
+                        sphere.visual.face_colors = [255, 0, 0, 200]
+                    scene.add_geometry(spheres)
+        
+        else:
+            # translate to place robot side by side
+            for k in range(self.batch_size):
+                trans_dist = k * spacing
+                translation = np.array([trans_dist, 0, 0]) # translation for each solution       
+                
+                # Add world origin axes
+                axis_length = .5
+                x_axis = trimesh.load_path([[trans_dist, 0, 0], [trans_dist + axis_length, 0, 0]])
+                y_axis = trimesh.load_path([[trans_dist, 0, 0], [trans_dist, axis_length, 0]])
+                z_axis = trimesh.load_path([[trans_dist, 0, 0], [trans_dist, 0, axis_length]])
+                x_axis.colors  = [[255, 0, 0, 255] * len(x_axis.entities)]
+                y_axis.colors  = [[0, 255, 0, 255] * len(x_axis.entities)]
+                z_axis.colors  = [[0, 0, 255, 255] * len(x_axis.entities)]
+                axes.extend([x_axis, y_axis, z_axis])
+
+                transformed_base = self.mesh_base.copy()
+                transformed_base.apply_transform(base_trans[k].detach().numpy())
+                transformed_base.apply_translation(translation)
+                transformed_bases.append(transformed_base)
+
+                for i in range(self.NUM_LEGS):
+                    leg_meshes = self.meshes_left if i % 2 == 0 else self.meshes_right
+                    leg_transforms = leg_trans[k, i]
+                    color = self.colors[i]
+
+                    for j, mesh in enumerate(leg_meshes):
+                        transformed_mesh = mesh.copy()
+                        transformed_mesh.apply_transform(leg_transforms[j].detach().numpy())
+                        transformed_mesh.apply_translation(translation)
+                        transformed_mesh.visual.face_colors = [color] * len(transformed_mesh.faces)
+                        transformed_legs.append(transformed_mesh)
+
+                if goal is not None:
+                    points = goal.numpy().reshape(-1, 3)
+                    spheres = [trimesh.creation.icosphere(radius=0.03).apply_translation(translation + point) for point in points]
+                    for sphere in spheres:
+                        sphere.visual.face_colors = [255, 0, 0, 200]
+                    scene.add_geometry(spheres)
+
             
         scene.add_geometry(ground_plane)
         scene.add_geometry(transformed_bases)
@@ -355,8 +412,8 @@ if __name__=='__main__':
     # eef_trans0 = leg_trans0[:,:,-1,:,:]
     # print("base_trans0:\n", base_trans0.detach().numpy())
     # print("leg_trans0:\n", leg_trans0)
-    # print(f"eef_trans: shape={eef_trans0.shape}\n", eef_trans0)
-    # print("eef_trans_x_axis", eef_trans0[:, :, :3, 0])
+    # print("eef_trans:\n", eef_trans0)
+    # print("eef_pos:\n", eef_trans0[:, :, :3, 3])
     # optimizer.visualize(base_trans=base_trans0, leg_trans=leg_trans0, batch_size=1, goal=None) # base origin = world origin
     
     GROUND_PLANE = 0.0 # height of ground plane
@@ -387,15 +444,22 @@ if __name__=='__main__':
     #                     [-.45, -0.3, GROUND_PLANE]])
 
     # --- SET 4 ---
-    leg_idxs = [0, 1]
-    legs_on_ground = [False, False, True, True, True, True]
-    legs_plane = [PLANE2, PLANE2, GROUND_PLANE, GROUND_PLANE, GROUND_PLANE, GROUND_PLANE]
-    pos = torch.tensor([[8.2, 0.3, PLANE2],
-                        [7.9, -0.2, PLANE2]])
-    rot = torch.zeros_like(pos)
-
+    # leg_idxs = [0, 1]
+    # legs_on_ground = [False, False, True, True, True, True]
+    # legs_plane = [PLANE2, PLANE2, GROUND_PLANE, GROUND_PLANE, GROUND_PLANE, GROUND_PLANE]
+    # pos = torch.tensor([[8.2, 0.3, PLANE2],
+    #                     [7.9, -0.2, PLANE2]])
+    # rot = torch.zeros_like(pos)
     
-    params = optimizer.solve_multiple_legs_ik(pos, rot, legs_on_ground=legs_on_ground, legs_plane=legs_plane, leg_idxs=leg_idxs)
+    # --- SET 5 --- free all legs, fix body
+    leg_idxs = []
+    legs_on_ground = [True] * 6
+    legs_plane = [GROUND_PLANE] * 6
+    pos = torch.tensor([])
+    rot = torch.zeros_like(pos)
+    params = optimizer.solve_multiple_legs_ik(pos, rot, legs_on_ground=legs_on_ground, legs_plane=legs_plane, leg_idxs=leg_idxs, has_base_goal=True, target_base_xy=torch.tensor([0., 0.5]))
+    
+    # params = optimizer.solve_multiple_legs_ik(pos, rot, legs_on_ground=legs_on_ground, legs_plane=legs_plane, leg_idxs=leg_idxs)
     robot_frame_trans_w, base_trans_w, leg_trans_w, leg_trans_r = optimizer.get_transformations_from_params(params)
     
     # --- print solutions + visualization ---
