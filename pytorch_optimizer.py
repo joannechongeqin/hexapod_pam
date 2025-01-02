@@ -163,14 +163,13 @@ class PamOptimizer:
     #     return True
 
 
-    def solve_multiple_legs_ik(self, pos, rot, leg_idxs, legs_on_ground, legs_plane, has_base_goal = False, target_base_xy = np.zeros(3)):
+    def solve_multiple_legs_ik(self, pos, rot, leg_idxs, legs_on_ground, has_base_goal = False, target_base_xy = np.zeros(3)):
         """
         Solves the inverse kinematics for multiple legs, optimizing to reach specified goal positions.
 
         :param pk.Transform3d goal: The desired position and orientation for the leg end-effectors. Shape: [len(leg_idxs), 4, 4].
         :param list leg_idxs: List of leg indices to be optimized.
         :param list legs_on_ground: List of boolean values indicating whether each leg is on the ground.
-        :param list legs_plane: List of heights of the planes on which the legs are placed.
         :param int batch_size: The number of samples processed at a time during a pass.
 
         :return: optimized_params
@@ -236,7 +235,6 @@ class PamOptimizer:
             # --- optimize based on free legs' height ---
             # free legs = legs not specified for target goal pos (xyz), but heights are fixed to a specific plane
             free_legs = [i for i in range(self.NUM_LEGS) if i not in leg_idxs]
-            # free_legs_plane = torch.tensor(legs_plane)[free_legs].repeat(self.batch_size, 1)
 
             free_legs_height = all_eef_pos_w[:, free_legs, 2, 3]
             free_legs_xy_pos = all_eef_pos_w[:, :, :2, 3]
@@ -434,14 +432,12 @@ if __name__=='__main__':
     # --- SET 1 ---
     # leg_idxs = [0, 1]
     # legs_on_ground = [False, False, True, True, True, True]
-    # legs_plane = [PLANE2, PLANE2, GROUND_PLANE, GROUND_PLANE, GROUND_PLANE, GROUND_PLANE]
     # pos = torch.tensor([[0.51589, 0.23145, PLANE2],
     #                     [0.51589, -0.23145, PLANE2]])
 
     # --- SET 2 ---
     leg_idxs = [0, 1]
     legs_on_ground = [True, True, True, True, True, True]
-    legs_plane = [PLANE2, PLANE2, PLANE1, PLANE1, GROUND_PLANE, GROUND_PLANE]
     pos = torch.tensor([[1.5, 0.3, PLANE2],
                         [1.5, -0.2, PLANE2]])
     rot = torch.zeros_like(pos)
@@ -458,7 +454,6 @@ if __name__=='__main__':
     # --- SET 4 ---
     # leg_idxs = [0, 1]
     # legs_on_ground = [False, False, True, True, True, True]
-    # legs_plane = [PLANE2, PLANE2, GROUND_PLANE, GROUND_PLANE, GROUND_PLANE, GROUND_PLANE]
     # pos = torch.tensor([[8.2, 0.3, PLANE2],
     #                     [7.9, -0.2, PLANE2]])
     # rot = torch.zeros_like(pos)
@@ -466,12 +461,11 @@ if __name__=='__main__':
     # --- SET 5 --- free all legs, fix body
     # leg_idxs = []
     # legs_on_ground = [True] * 6
-    # legs_plane = [GROUND_PLANE] * 6
     # pos = torch.tensor([])
     # rot = torch.zeros_like(pos)
-    params = optimizer.solve_multiple_legs_ik(pos, rot, legs_on_ground=legs_on_ground, legs_plane=legs_plane, leg_idxs=leg_idxs, has_base_goal=True, target_base_xy=torch.tensor([0.1, 0.]))
+    # params = optimizer.solve_multiple_legs_ik(pos, rot, legs_on_ground=legs_on_ground, leg_idxs=leg_idxs, has_base_goal=True, target_base_xy=torch.tensor([0.1, 0.]))
     
-    # params = optimizer.solve_multiple_legs_ik(pos, rot, legs_on_ground=legs_on_ground, legs_plane=legs_plane, leg_idxs=leg_idxs)
+    params = optimizer.solve_multiple_legs_ik(pos, rot, legs_on_ground=legs_on_ground, leg_idxs=leg_idxs)
     robot_frame_trans_w, base_trans_w, leg_trans_w, leg_trans_r = optimizer.get_transformations_from_params(params)
     
     # --- print solutions + visualization ---
