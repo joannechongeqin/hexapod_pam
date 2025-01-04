@@ -51,7 +51,7 @@ class PamOptimizer:
         logger = logging.getLogger('pam_optimizer')
         logger.setLevel(logging.DEBUG)
         console_handler = logging.StreamHandler()
-        file_handler = logging.FileHandler('pam.log')
+        file_handler = logging.FileHandler('pam.log', mode='w')
         logger.addHandler(console_handler)
         logger.addHandler(file_handler)
         return logger

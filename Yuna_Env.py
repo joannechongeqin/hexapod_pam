@@ -67,8 +67,8 @@ class Map:
 
 class YunaEnv:
     def __init__(self, real_robot_control=True, pybullet_on=True, visualiser=True, camerafollow=False, 
-                    eePos=eePos, bodyPos=np.array([0., 0., 0.]), 
-                    fyp_map_on=True, map_range=10.0, map_resolution=0.05, goal=[]):
+                    eePos=eePos, goal=[], 
+                    load_fyp_map=True, map_range=10.0, map_resolution=0.05):
         self.real_robot_control = real_robot_control
         self.visualiser = visualiser
         self.camerafollow = camerafollow
@@ -78,19 +78,18 @@ class YunaEnv:
         # self.all_reaction_forces = []
         # self.all_joint_torques = []
         self.complex_terrain = False
-        self.pybullet_on = pybullet_on
+        self.pybullet_on = pybullet_on # must be set to True if not will kill some functions below
         
-        self.eePos = eePos.copy() # neutral position for the robot
-        self.bodyPos = bodyPos.copy()
+        self.eePos = eePos.copy() # eePos wrt robot frame
 
-        self.fyp_map_on = fyp_map_on
+        self.load_fyp_map = load_fyp_map
         self.goal = goal
         self.map_range = map_range
         self.map_resolution = map_resolution
 
         if self.pybullet_on:
             self._load_env()
-        self._init_robot()
+        self._init_robot() # will have data of self.body_pos_w, self.body_orn_w
 
     def step(self, targetPositions, iteration=1, sleep='auto'):
         '''
@@ -129,10 +128,14 @@ class YunaEnv:
                     jointIndices=self.actuator, 
                     controlMode=p.POSITION_CONTROL, 
                     targetPositions=jointspace_command2bullet,
-                    forces=self.forces
-                    # forces = [60]*18
+                    # forces=self.forces
+                    forces = [60]*18
                     )
                 p.stepSimulation()
+                self.body_pos_w, self.body_orn_w = p.getBasePositionAndOrientation(self.YunaID)
+                self.body_pos_w = np.array(self.body_pos_w)
+                self.body_orn_w = np.array(self.body_orn_w)
+                self.eePos = self.get_leg_pos()
                 # reaction_forces = self.get_robot_joint_reaction_forces() # 18 (joints) x 6 (Fx Fy Fz Mx My Mz)
                 # torques_applied = self.get_robot_joint_motor_torques_applied()
                 # self.all_reaction_forces.append(reaction_forces)
@@ -222,9 +225,10 @@ class YunaEnv:
         else:
             return HexapodKinematics(), False, False, False, False, False, False
 
-    def load_rectangular_body(self, position, size):
+    def load_rectangular_body(self, position, size, color):
         wall_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=size)
-        wall_id = p.createMultiBody(baseCollisionShapeIndex=wall_shape, basePosition=position)
+        visual_shape = p.createVisualShape(p.GEOM_BOX, halfExtents=size, rgbaColor=color)
+        wall_id = p.createMultiBody(baseCollisionShapeIndex=wall_shape, basePosition=position, baseVisualShapeIndex=visual_shape)
         return wall_id
 
     def _load_env(self):
@@ -265,11 +269,11 @@ class YunaEnv:
         else:
             self.groundID = p.loadURDF('plane.urdf')
 
-        if self.fyp_map_on:
-            self.load_rectangular_body([1.5, 0, 0], [0.8, 1., 0.15])
+        if self.load_fyp_map:
+            self.load_rectangular_body([1.5, 0, 0], [0.8, 1., 0.15], [0.4, 0.58, 0.93, 1])
             if len(self.goal) > 0:
                 for point in self.goal:
-                    p.addUserDebugPoints(pointPositions=self.goal, pointColorsRGB=[[0.5, 0.5, 0.5]], pointSize=15, lifeTime=0)
+                    p.addUserDebugPoints(pointPositions=self.goal, pointColorsRGB=[[0.5, 0.5, 0.5]], pointSize=20, lifeTime=0)
 
         p.setGravity(0, 0, self.gravity)
         p.changeDynamics(self.groundID, -1, lateralFriction=self.friction)
@@ -277,15 +281,14 @@ class YunaEnv:
         self.height_map = Map(map_range=self.map_range, map_resolution=self.map_resolution, pybullet_on=self.pybullet_on) # generate a 2.5D height map for the environment
 
         # load Yuna robot
-        # Yuna_init_pos = [0,0,0.5]
-        Yuna_init_pos = np.append(self.bodyPos.copy()[:2], 0.5)
-        Yuna_init_orn = p.getQuaternionFromEuler([0,0,0]) # TODO
+        Yuna_init_pos = [0,0,0.5]
+        Yuna_init_orn = p.getQuaternionFromEuler([0,0,0])
         Yuna_file_path = os.path.abspath(os.path.dirname(__file__)) + '/urdf/yuna.urdf'
         self.YunaID = p.loadURDF(Yuna_file_path, Yuna_init_pos, Yuna_init_orn)
         self.joint_num = p.getNumJoints(self.YunaID) # 41
         self.actuator = [i for i in range(self.joint_num) if p.getJointInfo(self.YunaID,i)[2] != p.JOINT_FIXED] # 18 DOF
         # print("actuators info:", [p.getJointInfo(self.YunaID, joint)[1] for joint in self.actuator])
-        self.forces = [38 if "shoulder" in p.getJointInfo(self.YunaID, joint)[1].decode('utf-8') else 20 for joint in self.actuator]
+        # self.forces = [38 if "shoulder" in p.getJointInfo(self.YunaID, joint)[1].decode('utf-8') else 20 for joint in self.actuator]
 
         if self.visualiser:
             self._add_reference_line()
@@ -305,27 +308,23 @@ class YunaEnv:
         # parameters
         init_pos = self.eePos.copy()
         self.step(init_pos, iteration=65, sleep='auto')
-        for i in self.actuator:
-            p.enableJointForceTorqueSensor(self.YunaID, i, 1) # enable force/torque sensor
-
-    def get_body_pose(self):
-        '''
-        Get the position and orientation of the robot in the pybullet simulation
-        :return pos: position of the robot in world frame
-        :return orn: orientation of the robot in world frame in Euler angles
-        '''
-        pos, orn = p.getBasePositionAndOrientation(self.YunaID)
-        return pos, p.getEulerFromQuaternion(orn)
+        self.body_pos_w, self.body_orn_w = p.getBasePositionAndOrientation(self.YunaID) # use pybullet to get initial body position and orientation in world frame
+        self.body_pos_w = np.array(self.body_pos_w)
+        self.body_orn_w = np.array(self.body_orn_w)
+        # for i in self.actuator:
+        #     p.enableJointForceTorqueSensor(self.YunaID, i, 1) # enable force/torque sensor
     
+    def getMatrixFromQuaternion(self, orn):
+        return np.array(p.getMatrixFromQuaternion(orn)).reshape(3, 3)
+
     def get_body_matrix(self):
         '''
-        Get homogeneous transformation matrix of body frame
+        Get homogeneous transformation matrix of body frame wrt world frame
         '''
-        pos, orn = p.getBasePositionAndOrientation(self.YunaID)
-        rot_mat = np.array(p.getMatrixFromQuaternion(orn)).reshape(3, 3)
+        rot_mat = self.getMatrixFromQuaternion(self.body_orn_w)
         body_mat = np.eye(4)
         body_mat[:3, :3] = rot_mat
-        body_mat[:3, 3] = pos
+        body_mat[:3, 3] = self.body_pos_w
         return body_mat
     
     def _cam_follow(self):
@@ -333,7 +332,15 @@ class YunaEnv:
         Follow the robot with the camera in the pybullet simulation
         :return: None
         '''
-        cam_pos, cam_orn = self.get_body_pose()
+        def _get_body_pose(self):
+            '''
+            Get the position and orientation of the robot in the pybullet simulation
+            :return pos: position of the robot in world frame
+            :return orn: orientation of the robot in world frame in Euler angles
+            '''
+            pos, orn = p.getBasePositionAndOrientation(self.YunaID)
+            return pos, p.getEulerFromQuaternion(orn)
+        cam_pos, cam_orn = _get_body_pose(self)
         # p.resetDebugVisualizerCamera(cameraDistance=2, cameraYaw=np.rad2deg(cam_orn[2])-90, cameraPitch=-35, cameraTargetPosition=cam_pos)#
         p.resetDebugVisualizerCamera(cameraDistance=2, cameraYaw=-90, cameraPitch=-35, cameraTargetPosition=cam_pos)
 
@@ -351,8 +358,8 @@ class YunaEnv:
         p.addUserDebugLine(lineFromXYZ=[-100,0,0], lineToXYZ=[100,0,0], lineColorRGB=[0,0,0], lineWidth=1)
         p.addUserDebugLine(lineFromXYZ=[0,-100,0], lineToXYZ=[0,100,0], lineColorRGB=[0,0,0], lineWidth=1)
         
-    def add_y_ref_line_at_height(self, height, lineColorRGB=[1,0,1]):
-        p.addUserDebugLine(lineFromXYZ=[0,-100,height], lineToXYZ=[0,100,height], lineColorRGB=lineColorRGB, lineWidth=1)
+    # def add_y_ref_line_at_height(self, height, lineColorRGB=[1,0,1]):
+    #     p.addUserDebugLine(lineFromXYZ=[0,-100,height], lineToXYZ=[0,100,height], lineColorRGB=lineColorRGB, lineWidth=1)
     
     def add_ref_points_wrt_body_frame(self, points_b, pointSize=5, lifeTime=10):
         '''
@@ -378,13 +385,12 @@ class YunaEnv:
     
     def add_body_ref_points_wrt_body_frame(self, points_b, pointSize=5, lifeTime=10):
         WTB = self.get_body_matrix()
-        print(points_b)
+        # print(points_b)
         points_w = np.dot(WTB, np.vstack((points_b, np.ones((1, 6)))))[0:3, :]
         p.addUserDebugPoints(pointPositions=points_w, pointColorsRGB=[[1, 0, 0]] * len(points_w), pointSize=pointSize, lifeTime=lifeTime)
     
-    def add_body_frame_ref_point(self):
-        pos, _ = p.getBasePositionAndOrientation(self.YunaID)
-        p.addUserDebugPoints(pointPositions=[pos], pointColorsRGB=[[0.5, 0.5, 0.5]], pointSize=10, lifeTime=0)
+    def add_body_frame_ref_point(self): # calculated body_frame, might have error when compared to actual one in pybullet
+        p.addUserDebugPoints(pointPositions=[np.array(self.body_pos_w)], pointColorsRGB=[[0.5, 0.5, 0.5]], pointSize=10, lifeTime=0)
                 
     def get_robot_config(self):
         '''
@@ -398,13 +404,13 @@ class YunaEnv:
 
         return robot_config
     
-    def get_robot_joint_reaction_forces(self):
-        if not self.real_robot_control:
-            return np.array([p.getJointState(self.YunaID, i)[2] for i in self.actuator])
+    # def get_robot_joint_reaction_forces(self):
+    #     if not self.real_robot_control:
+    #         return np.array([p.getJointState(self.YunaID, i)[2] for i in self.actuator])
         
-    def get_robot_joint_motor_torques_applied(self):
-        if not self.real_robot_control:
-            return np.array([p.getJointState(self.YunaID, i)[3] for i in self.actuator])
+    # def get_robot_joint_motor_torques_applied(self):
+    #     if not self.real_robot_control:
+    #         return np.array([p.getJointState(self.YunaID, i)[3] for i in self.actuator])
 
     def get_leg_pos(self):
         '''
@@ -441,7 +447,17 @@ if __name__=='__main__':
     yunaenv = YunaEnv(real_robot_control=0)
     
     height_map = yunaenv.height_map
-    height_map.plot()
+    # height_map.plot()
 
+    print("init_base_pos: ", yunaenv.body_pos_w) # (0, 0, 0.1426)
+    print("init_base_matrix: ", yunaenv.get_body_matrix())
+    print("init_leg_pos_r: ", yunaenv.get_leg_pos())
+    # [[ 0.51637698  0.51636734  0.05752237  0.05750151 -0.45838417 -0.45850756]
+    #  [ 0.2316928  -0.23172229  0.51306432 -0.51305886  0.33115791 -0.33117548]
+    #  [-0.12009861 -0.12009305 -0.120094   -0.12008067 -0.11029625 -0.11044209]]
+    print("init_leg_pos_w: ", yunaenv.get_leg_pos_in_world_frame())
+    # [[ 0.5149191   0.5147523   0.05616759  0.05579873 -0.4598487  -0.46019582]
+    #  [ 0.23102842 -0.23238657  0.51255405 -0.51356891  0.33082626 -0.33150703]
+    #  [ 0.02536965  0.02562286  0.02256538  0.02312707  0.02947116  0.02967863]]
     time.sleep(3)
     yunaenv.close()

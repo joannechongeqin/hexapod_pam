@@ -19,13 +19,15 @@ eePos0_opt = np.array( [[ 0.4901,  0.4900,  0.0426,  0.0424, -0.4475, -0.4476],
 
 class Yuna:
     def __init__(self, visualiser=True, camerafollow=True, real_robot_control=False, pybullet_on=True, show_ref_points=False, 
-                    eePos=eePos0_opt, bodyPos=np.array([0., 0., 0.]), batch_size=1, opt_vis=False, goal=[]):
-        # NOTE: bodyPos in world frame, eePos in body frame
+                    eePos=eePos0_opt, goal=[], load_fyp_map=False,
+                    batch_size=1, opt_vis=False, body_interval=0.15):
         # initialise the environment
         self.env = YunaEnv(visualiser=visualiser, camerafollow=camerafollow, real_robot_control=real_robot_control, pybullet_on=pybullet_on, 
-                                eePos=eePos, bodyPos=bodyPos, goal=goal)
-        self.bodyPos = self.env.bodyPos.copy() # initial robot body position in world frame
-        self.eePos = self.env.eePos.copy() # initial robot leg end-effecter position w.r.t body frame
+                                eePos=eePos, goal=goal, load_fyp_map=load_fyp_map)
+        self.bodyPos = self.env.body_pos_w.copy()   # initial robot body position w.r.t world frame
+        self.bodyOrn = self.env.body_orn_w.copy()   # initial robot body orientation w.r.t world frame
+        self.eePos = self.env.eePos.copy()          # initial robot leg end-effector position w.r.t body frame
+        
         self.eeAng = np.array([0., 0., 0., 0., 0., 0.,]) # the deviation of each leg from neutral position, use 0. to initiate a float type array
         self.init_pose = np.zeros((4, 6))
         self.current_pose = np.copy(self.init_pose)
@@ -59,7 +61,7 @@ class Yuna:
         self.batch_size = batch_size
         self.opt_vis = opt_vis # visualize final pose obtained from optimzer
         self.optimizer = PamOptimizer(height_map=self.height_map, batch_size=batch_size, vis=opt_vis)
-        self.body_interval = 0.15 # interval length to move body in world frame, if initial and final body poses are too far apart
+        self.body_interval = body_interval # interval length to move body in world frame (for planner), if initial and final body poses are too far apart
 
     def step(self, *args, **kwargs):
         '''
@@ -133,18 +135,47 @@ class Yuna:
         if self.is_moving:
             self.step(step_len=0,rotation=0)
             self.is_moving = False
+
+    def get_body_matrix(self): # homogeneous transformation matrix of body frame wrt world frame
+        rot_mat = self.env.getMatrixFromQuaternion(self.bodyOrn)
+        body_mat = np.eye(4)
+        body_mat[:3, :3] = rot_mat
+        body_mat[:3, 3] = self.bodyPos_w()
+        return body_mat
+    
+    def _eef_world_to_body_frame(self, pos_w):
+        WTB = self.get_body_matrix()
+        BTW = np.linalg.inv(WTB)
+        return np.dot(BTW, np.vstack((pos_w, np.ones((1, 6)))))[0:3, :] # BpE = BTW * WpE
+    
+    def _eef_body_to_world_frame(self, pos_b):
+        WTB = self.get_body_matrix()
+        return np.dot(WTB, np.vstack((pos_b, np.ones((1, 6)))))[0:3, :]
+
+    def eePos_b(self): 
+        # get end-effector position wrt body frame
+        # return self.eePos # calculated
+        return self.env.get_leg_pos().copy() # based on pybullet
+    
+    def eePos_w(self):
+        # get end-effector position wrt world frame
+        # return self._eef_body_to_world_frame(self.eePos_b()) # calculated
+        return self.env.get_leg_pos_in_world_frame().copy() # based on pybullet
+    
+    def bodyPos_w(self):
+        # return self.bodyPos # calculated
+        return np.array(self.env.body_pos_w) # based on pybullet
     
     def swing_leg(self, leg_index, target_pos):
         '''
         :param leg_index: The index of the leg to move
         :param target_pos: The target position of the leg in the world frame
         '''
-        pos_w0 = self.env.get_leg_pos_in_world_frame().copy()  # initial leg position in world frame
+        pos_w0 = self.eePos_w().copy()  # initial leg position in world frame
         target_leg_midpoint = (pos_w0[:, leg_index] + target_pos) / 2  # use xy midpoint
         target_leg_midpoint[2] = max(pos_w0[2, leg_index], target_pos[2]) + STEP_HEIGHT  # raise
         pos_w1 = pos_w0.copy()
         pos_w1[:, leg_index] = target_leg_midpoint
-
         pos_w2 = pos_w0.copy()
         pos_w2[:, leg_index] = target_pos
 
@@ -154,82 +185,92 @@ class Yuna:
 
     def move_legs_to_pos_in_body_frame(self, target_pos_arr):
         '''
-        target_pos_arr: an array of 3x6 arrays of target leg positions wrt BODY frame
+        target_pos_arr: a nx3x6 array of n target leg positions wrt BODY frame
         '''
-        pos_b0 = self.env.get_leg_pos().copy() # initial leg pos in body frame
+        pos_b0 = self.eePos_b().copy() # self.env.get_leg_pos().copy() # initial leg pos in body frame
         waypoints = [pos_b0] + target_pos_arr
-        
+        # print("waypoints: ", waypoints)
+
         # plan and execute trajectory
         traj = self.trajplanner.general_traj(waypoints, total_time=len(waypoints) * 0.8)
+        
         counter = 0
         for traj_point in traj:
+            # print(traj_point)
             self.env.step(traj_point)
             # debug visualization
             if self.show_ref_points and counter % 10 == 0:
                 self.env.add_ref_points_wrt_body_frame(traj_point)
                 self.env.add_body_frame_ref_point()
             counter += 1
-        # print("num of traj points: ", counter) 
-    
+        # print("num of traj points: ", counter)
+        self.eePos = target_pos_arr[-1].copy()
+
     def move_legs_to_pos_in_world_frame(self, target_pos_arr):
         '''
-        target_pos_arr: an array of 3x6 arrays of target leg positions wrt WORLD frame
+        target_pos_arr: a nx3x6 array of n target leg positions wrt WORLD frame
         '''
-        WTB = self.env.get_body_matrix() # body frame wrt world
-        BTW = np.linalg.inv(WTB)
-        target_pos_body = [np.dot(BTW, np.vstack((pos, np.ones((1, 6)))))[0:3, :] for pos in target_pos_arr] # BpE = BTW * WpE
+        target_pos_body = [self._eef_world_to_body_frame(pos_w) for pos_w in target_pos_arr]
         self.move_legs_to_pos_in_body_frame(target_pos_body)
         
     def move_legs_by_pos_in_body_frame(self, move_by_pos_arr):
         '''
-        move_by_pos_arr: an array of 3x6 arrays (move_by_pos), each column of move_by_pos is the dx dy dz of each leg wrt BODY frame
+        move_by_pos_arr: a nx3x6 array of n move_by_pos wrt BODY frame, 
+                        each column of move_by_pos is the dx dy dz of each leg wrt BODY frame
         '''
-        pos_b = self.env.get_leg_pos().copy() # leg pos in body frame
-        target_pos_arr = []
-        for move_by_pos in move_by_pos_arr:
-            pos_b += move_by_pos
-            target_pos_arr.append(pos_b.copy())
+        pos_b0 = self.eePos_b().copy() # initial leg pos in body frame
+        target_pos_arr = [pos_b0 + move_by_pos for move_by_pos in move_by_pos_arr]
+        # print("target_pos_arr: \n", target_pos_arr)
         self.move_legs_to_pos_in_body_frame(target_pos_arr)
     
     def move_legs_by_pos_in_world_frame(self, move_by_pos_arr):
         '''
-        move_by_pos_arr: an array of 3x6 arrays (move_by_pos), each column of move_by_pos is the dx dy dz of each leg wrt WORLD frame
+        move_by_pos_arr: a nx3x6 array of n move_by_pos wrt WORLD frame, 
+                        each column of move_by_pos is the dx dy dz of each leg wrt BODY frame
         '''
-        pos_b = self.env.get_leg_pos().copy() # leg pos in body frame
-        WTB = self.env.get_body_matrix() # body frame wrt world
-        BTW = np.linalg.inv(WTB)
-        pos_w = np.dot(WTB, np.vstack((pos_b, np.ones((1, 6)))))[0:3, :] # leg pos in world frame
-        target_pos_arr = []
-        for move_by_pos in move_by_pos_arr:
-            pos_w += move_by_pos
-            target_pos_arr.append(pos_w.copy())
+        pos_w0 = self.eePos_w().copy() # initial leg pos in body frame
+        target_pos_arr = [pos_w0 + move_by_pos for move_by_pos in move_by_pos_arr]
+        # print("target_pos_arr: \n", target_pos_arr)
         self.move_legs_to_pos_in_world_frame(target_pos_arr)
-        
-    def rotx_body(self, angle, num_of_waypoints=2, move=False):
+
+    def trans_body_by_in_world_frame(self, trans_by_arr):
         '''
-        angle: rotation angle in degrees
-        return: final leg pos wrt body frame to achieve the body rotation
+        trans_by_arr: a 1x3 array of dx dy dz wrt WORLD frame
         '''
-        WTB0 = self.env.get_body_matrix() # initial body frame wrt world
-        pos_b0 = self.env.get_leg_pos().copy() # initial leg pos in body frame
-        pos_w0 = np.dot(WTB0, np.vstack((pos_b0, np.ones((1, 6)))))[0:3, :] # initial leg pos in world frame
-        # print("initial leg pos wrt body frame: \n", pos_b0)
-        # print("initial body frame wrt world: \n", WTB0)
-        # print("initial leg pos wrt world frame: \n", pos_w0)
+        move_by_pos_arr = -np.tile(trans_by_arr, (6, 1)).T
+        self.move_legs_by_pos_in_world_frame([move_by_pos_arr])
+        self.bodyPos += trans_by_arr
+
+    def trans_body_to_in_world_frame(self, target_body_pos):
+        body_pos_w0 = self.bodyPos_w().copy() # initial body pos in world frame
+        trans_by = target_body_pos - body_pos_w0
+        self.trans_body_by_in_world_frame(trans_by)
+
+    # def rotx_body(self, angle, num_of_waypoints=2, move=False):
+    #     '''
+    #     angle: rotation angle in degrees
+    #     return: final leg pos wrt body frame to achieve the body rotation
+    #     '''
+    #     WTB0 = self.get_body_matrix() # initial body frame wrt world
+    #     pos_b0 = self.eePos_b() # self.env.get_leg_pos().copy() # initial leg pos in body frame
+    #     pos_w0 = self.eePos_w() # np.dot(WTB0, np.vstack((pos_b0, np.ones((1, 6)))))[0:3, :] # initial leg pos in world frame
+    #     # print("initial leg pos wrt body frame: \n", pos_b0)
+    #     # print("initial body frame wrt world: \n", WTB0)
+    #     # print("initial leg pos wrt world frame: \n", pos_w0)
         
-        target_pos_arr = []
-        interval = angle / num_of_waypoints
-        for i in range(1, num_of_waypoints+1):
-            angle = np.deg2rad(interval*i)
-            c, s = np.cos(angle), np.sin(angle)
-            rot_x = np.array([[1, 0, 0, 0], [0, c, -s, 0], [0, s, c, 0], [0, 0, 0, 1]])
-            WTB1 = np.dot(WTB0, rot_x) # final body frame wrt world after rotation
-            # initial and final pos in world frame should be the same --> find final pos in body frame
-            pos_b1 = np.dot(np.linalg.inv(WTB1), np.vstack((pos_w0, np.ones((1, 6)))))[0:3, :] # final leg pos in body frame
-            # print("final body frame wrt world: \n", WTB1)
-            # print("final leg pos wrt body frame: \n", pos_b1)
-            # print("final leg pos wrt world frame: \n", np.dot(WTB1, np.vstack((pos_b1, np.ones((1, 6)))))[0:3, :])
-            target_pos_arr.append(pos_b1.copy())
+    #     target_pos_arr = []
+    #     interval = angle / num_of_waypoints
+    #     for i in range(1, num_of_waypoints+1):
+    #         angle = np.deg2rad(interval*i)
+    #         c, s = np.cos(angle), np.sin(angle)
+    #         rot_x = np.array([[1, 0, 0, 0], [0, c, -s, 0], [0, s, c, 0], [0, 0, 0, 1]])
+    #         WTB1 = np.dot(WTB0, rot_x) # final body frame wrt world after rotation
+    #         # initial and final pos in world frame should be the same --> find final pos in body frame
+    #         pos_b1 = np.dot(np.linalg.inv(WTB1), np.vstack((pos_w0, np.ones((1, 6)))))[0:3, :] # final leg pos in body frame
+    #         # print("final body frame wrt world: \n", WTB1)
+    #         # print("final leg pos wrt body frame: \n", pos_b1)
+    #         # print("final leg pos wrt world frame: \n", np.dot(WTB1, np.vstack((pos_b1, np.ones((1, 6)))))[0:3, :])
+    #         target_pos_arr.append(pos_b1.copy())
         
         # # debug check (compare with actual)
         # final_actual_pos = self.env.get_leg_pos().copy()
@@ -238,62 +279,40 @@ class Yuna:
         # print("final actual body frame wrt world: \n", final_actual_WTB)
         # print("final actual leg pos wrt world frame: \n", np.dot(final_actual_WTB, np.vstack((final_actual_pos, np.ones((1, 6)))))[0:3, :])
         
-        if move:
-            self.move_legs_to_pos_in_body_frame(target_pos_arr)
-        return pos_b1
-    
-    def trans_body_by(self, dx, dy, dz, move=False):
-        move_by_pos_arr = np.array([[-dx] * 6, [-dy] * 6, [-dz] * 6])  
-        if move:       
-            self.move_legs_by_pos_in_body_frame([move_by_pos_arr])
-        return move_by_pos_arr
-    
-    def trans_body_by_in_world_frame(self, dx, dy, dz, move=False):
-        move_by_pos_arr = np.array([[-dx] * 6, [-dy] * 6, [-dz] * 6])
-        if move:
-            self.move_legs_by_pos_in_world_frame([move_by_pos_arr])
-        # return
+        # if move:
+        #     self.move_legs_to_pos_in_body_frame(target_pos_arr)
+        # return pos_b1
 
-    def trans_body_by_in_world_frame(self, trans_by_arr, move=False):
-        dx, dy, dz = trans_by_arr
-        move_by_pos_arr = np.array([[-dx] * 6, [-dy] * 6, [-dz] * 6])
-        if move:
-            self.move_legs_by_pos_in_world_frame([move_by_pos_arr])
-    
-    def trans_body_to_in_world_frame(self, target_body_pos, move=False):
-        body_pos_w0 = self.env.get_body_pose()[0] # initial body pos in world frame
-        trans_by = target_body_pos - body_pos_w0
-        # print("target_body_pos: ", target_body_pos)
-        # print("body_pos_w0: ", body_pos_w0)
-        # print("trans_by: ", trans_by)
-        self.trans_body_by_in_world_frame(trans_by, move=move)
-
-    def rotx_trans_body(self, angle, dx, dy, dz, move=False):
-        pos_b0 = self.env.get_leg_pos().copy() # initial leg pos in body frame
-        pos_b1 = self.rotx_body(angle) # target pos after rotation in body frame
-        move_by_pos_arr = (pos_b1 - pos_b0) + self.trans_body(dx, dy, dz, move=False)
-        if move:
-            self.move_legs_by_pos_in_body_frame([move_by_pos_arr])
-        return move_by_pos_arr
+    # def rotx_trans_body(self, angle, dx, dy, dz, move=False):
+    #     pos_b0 = self.env.get_leg_pos().copy() # initial leg pos in body frame
+    #     pos_b1 = self.rotx_body(angle) # target pos after rotation in body frame
+    #     move_by_pos_arr = (pos_b1 - pos_b0) + self.trans_body(dx, dy, dz, move=False)
+    #     if move:
+    #         self.move_legs_by_pos_in_body_frame([move_by_pos_arr])
+    #     return move_by_pos_arr
     
     def move_to_next_pose(self, next_body_pos_w, next_eef_pos_w, leg_sequence=[4, 5, 0, 1, 2, 3]): # next nearest pose
         # TODO: leg sequence according to movement direction instead of hard code
         # TODO: merge trans_body into swing_leg so it move smoothly
         # TODO: fix potential self collision
         num_legs = 6
-        # leg_sequence = [4, 5, 2, 3, 0, 1] # back then middle then front, left then right
-        # leg_sequence = [4, 5, 0, 1, 2, 3] # back then front then middle, left then right
-        initial_body_pos_w = self.env.get_body_pose()[0]
+        initial_body_pos_w = self.bodyPos_w().copy() # initial body pos in world frame
         # self.trans_body_to_in_world_frame(np.array(next_body_pos_w), move=True)
         for i in range(num_legs):
             if i % 2 == 0: # i = 0, 2, 4 (first, third, fifth legs)
                 intermediate_body_pos_w = initial_body_pos_w + (i/2 + 1) * (next_body_pos_w - initial_body_pos_w) / 3
-                self.trans_body_to_in_world_frame(np.array(intermediate_body_pos_w), move=True)            
-            leg_idx = leg_sequence[i]
+                self.trans_body_to_in_world_frame(np.array(intermediate_body_pos_w))            
+            leg_idx = leg_sequence[i] 
+
+            # force adjust eef pos to be at least at the height of the next position so that it doesn't push too much on the ground
+            height_at_next_pos = self.height_map.get_height_at(next_eef_pos_w[0, leg_idx], next_eef_pos_w[1, leg_idx])
+            if next_eef_pos_w[2, leg_idx] < height_at_next_pos:
+                next_eef_pos_w[2, leg_idx] = height_at_next_pos
+          
             self.swing_leg(leg_idx, next_eef_pos_w[:, leg_idx])
 
     def pam(self, pos, rot, legs_on_ground, leg_idxs, batch_idx=0):
-        initial_body_pos = self.env.get_body_pose()[0] # initial body pos in world frame
+        initial_body_pos = self.bodyPos_w().copy() # initial body pos in world frame
 
         self.optimizer.logger.info("----- STARTING PAM -----")
         final_params = self.optimizer.solve_multiple_legs_ik(pos, rot, legs_on_ground, leg_idxs, False)
@@ -334,8 +353,6 @@ class Yuna:
 
         body_waypoints = []
         legs_waypoints = []
-
-
         for i in range(1, num_of_waypoints):
             # linear interpolation between initial and final optimized body pose
             body_waypoint = initial_body_pos + i * (final_body_pos_w - initial_body_pos) / num_of_waypoints
@@ -346,7 +363,7 @@ class Yuna:
             temp_pos = torch.tensor([])
             temp_rot = torch.zeros_like(temp_pos)
             
-            self.optimizer.logger.info(f"--- Solving for waypoint {i} ---")
+            self.optimizer.logger.info(f"\n--- Solving for waypoint {i} ---")
             next_params = self.optimizer.solve_multiple_legs_ik(pos=temp_pos, rot=temp_rot, legs_on_ground=legs_on_ground, leg_idxs=leg_idxs, has_base_goal=True, target_base_xy=torch.tensor(body_waypoint[:2]))
             _, next_base_trans_w, next_leg_trans_w, _ = self.optimizer.get_transformations_from_params(next_params)
             next_body_pos_w = next_base_trans_w[batch_idx, :3, 3].numpy()
@@ -359,7 +376,7 @@ class Yuna:
         body_waypoints.append(final_body_pos_w)
         legs_waypoints.append(final_eef_pos_w)
         self.optimizer.logger.debug(f"initial body pos: {initial_body_pos}")
-        self.optimizer.logger.debug(f"initial eef pos: {self.env.get_leg_pos_in_world_frame()}")
+        self.optimizer.logger.debug(f"initial eef pos: {self.eePos_w()}")
         self.optimizer.logger.info(f"body waypoints: {body_waypoints}")
         self.optimizer.logger.info(f"legs waypoints: {legs_waypoints}")
         
@@ -370,7 +387,7 @@ class Yuna:
             self.move_to_next_pose(body_waypoints[i], legs_waypoints[i])
 
         # TODO: now hardcode last leg sequence, assuming it's known that leg idx 1 is raised last
-        self.move_to_next_pose(final_body_pos_w[-1], final_eef_pos_w[-1], leg_sequence = [4, 5, 2, 3, 0, 1])
+        self.move_to_next_pose(body_waypoints[-1], legs_waypoints[-1], leg_sequence = [4, 5, 2, 3, 0, 1])
     
     def _plot_hexapod_path(self, body_waypoints, legs_waypoints):
         cmap = plt.get_cmap('tab10')
@@ -534,25 +551,93 @@ class Yuna:
             current_pos[:, leg_index] = self.trajplanner.pose2pos(self.current_pose[:, leg_index], leg_index)
         return current_pos
 
+    def print_robot_info(self):
+        print("yuna.bodyPos: \n", yuna.bodyPos_w())
+        print("yuna.eePos_b: \n", yuna.eePos_b())
+        print("yuna.eePos_b2: \n",yuna._eef_world_to_body_frame(yuna.eePos_w()))
+        print("yuna.eePos_w: \n", yuna.eePos_w())
+        print()
+        print("yuna.env.bodyPos: \n", yuna.env.body_pos_w)
+        print("yuna.env.eePos_b: \n", yuna.env.eePos)
+        print("yuna.env.eePos_w: \n", yuna.env.get_leg_pos_in_world_frame())
+        print()
+        print("body diff: \n", yuna.bodyPos_w() - yuna.env.body_pos_w)
+        print("eef_b diff: \n", yuna.eePos_b() - yuna.env.eePos)
+        print("eef_w diff: \n", yuna.eePos_w() - yuna.env.get_leg_pos_in_world_frame())
+        print("-" * 50)
+        print()
+
 if __name__ == '__main__':
     # motion test of yuna robot
     import time
-    yuna = Yuna()
-    print('There will be a series of robot movements with randomly generated parameters')
-    for motion in range(10):
-        step_len = np.random.uniform(0, yuna.max_step_len)
-        course = np.random.rand() * 360
-        rotation = np.random.uniform(-yuna.max_rotation, yuna.max_rotation)
-        steps = np.random.randint(1, 6)
-        print('Yuna command summary: step length = ' + str(np.around(step_len, decimals=4)) \
-                + ', course direction = ' + str(np.around(course, decimals=2)) \
-                + ', rotation angle = ' + str(np.around(rotation, decimals=2)) \
-                + ', step number = ' + str(np.around(steps, decimals=2)))
-        yuna.step(step_len=step_len, course=course, rotation=rotation, steps=steps)
-        if np.random.rand() > 0.7:
-            yuna.stop()
-            time.sleep(1)
-            print('Yuna stopped')
+    yuna = Yuna(real_robot_control=0, pybullet_on=1)
+    yuna.env.camerafollow = False
+
+    # -- check initial values ---
+    print("---initial---")
+    yuna.print_robot_info()
+
+    # yuna.step(step_len=0.1, course=0, rotation=0, steps=10)
+
+    # -- test move_legs_to_pos_in_body_frame ---
+    # target_eePos_r = [np.array([[ 0.4901,  0.49,    0.0426,  0.0424, -0.4475, -0.4476],
+    #                         [ 0.2338, -0.234,   0.4914, -0.4914,  0.3076, -0.3074],
+    #                         [      0, -0.1252, -0.1252, -0.1252,  -0.1252, -0.1252]])]
+    # yuna.move_legs_to_pos_in_body_frame(target_eePos_r)
+    # print("---final---")
+    # yuna.print_robot_info()
+
+    # -- test move_legs_to_pos_in_world_frame ---
+    target_eePos_w = [np.array([[ 0.4919,  0.4919,  0.0442,  0.0442, -0.4467, -0.4465],
+                            [ 0.2335, -0.2349,  0.4915, -0.4924,  0.3073, -0.3082],
+                            [ 0.2224,  0.0228,  0.0293,  0.0295,  0.0252,  0.0254]])]
+    yuna.move_legs_to_pos_in_world_frame(target_eePos_w)
+    print("---final---")
+    yuna.print_robot_info()
+
+    # -- test move_legs_by_pos_in_body_frame ---
+    # target_eePos_diff_w = [np.array([[0, 0, 0, 0, 0, 0],
+    #                                  [0, 0, 0, 0, 0, 0],
+    #                                  [0.2, 0, 0, 0, 0, 0.2]])]
+    # yuna.move_legs_by_pos_in_body_frame(target_eePos_diff_w)
+    # print("---final---")
+    # yuna.print_robot_info()
+
+    # -- test move_legs_by_pos_in_world_frame ---
+    # target_eePos_diff_w = [np.array([[0, 0, 0, 0, 0, 0],
+    #                                  [0, 0, 0, 0, 0, 0],
+    #                                  [-0.2, 0, 0, 0, 0, -0.2]])]
+    # yuna.move_legs_by_pos_in_world_frame(target_eePos_diff_w)
+    # print("---final---")
+    # yuna.print_robot_info()
+
+    # -- test trans_body_by_in_world_frame ---
+    trans_body_by = np.array([0.05, 0, 0.05])
+    yuna.trans_body_by_in_world_frame(trans_body_by)
+    print("---final---")
+    yuna.print_robot_info()
+
+    # -- test trans_body_to_in_world_frame ---
+    # trans_body_to = np.array([0.05, 0, 0.145])
+    # yuna.trans_body_to_in_world_frame(trans_body_to)
+    # print("---final---")
+    # yuna.print_robot_info()
+
+    # print('There will be a series of robot movements with randomly generated parameters')
+    # for motion in range(10):
+    #     step_len = np.random.uniform(0, yuna.max_step_len)
+    #     course = np.random.rand() * 360
+    #     rotation = np.random.uniform(-yuna.max_rotation, yuna.max_rotation)
+    #     steps = np.random.randint(1, 6)
+    #     print('Yuna command summary: step length = ' + str(np.around(step_len, decimals=4)) \
+    #             + ', course direction = ' + str(np.around(course, decimals=2)) \
+    #             + ', rotation angle = ' + str(np.around(rotation, decimals=2)) \
+    #             + ', step number = ' + str(np.around(steps, decimals=2)))
+    #     yuna.step(step_len=step_len, course=course, rotation=rotation, steps=steps)
+    #     if np.random.rand() > 0.7:
+    #         yuna.stop()
+    #         time.sleep(1)
+    #         print('Yuna stopped')
 
     time.sleep(60)
     yuna.disconnect()
