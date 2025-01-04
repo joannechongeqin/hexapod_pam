@@ -24,6 +24,7 @@ class PamOptimizer:
         self.vis = vis
         self.curr_dir = os.path.dirname(os.path.abspath(__file__))
         self.height_map = height_map
+        self.BODY_HEIGHT_CLEARANCE_THRESHOLD = 0.12
 
         # initial [guess] joint angles for robot's legs
         # 1x18, each group of 3 values represents joint angles for each leg
@@ -278,30 +279,28 @@ class PamOptimizer:
             # --- TODO: OPTIMIZE BODY HEIGHTS? 
             # !!! currently sometimes body will collide with next plane level
             # estimated body size: 390mm in y direction, 600mm in x direction
-            # base_center = params[:, 18:20] # base_center:  tensor([[0.6039, 0.8589]], grad_fn=<SliceBackward0>)
-            # base_len_x, base_len_y = 0.6, 0.4
-            # resolution = self.height_map.map_resolution
-            # x_min = base_center[:, 0] - base_len_x / 2
-            # x_max = base_center[:, 0] + base_len_x / 2
-            # y_min = base_center[:, 1] - base_len_y / 2
-            # y_max = base_center[:, 1] + base_len_y / 2
-            # x_points = [np.arange(l.item(), r.item() + resolution, resolution) for l, r in zip(x_min, x_max)]
-            # y_points = [np.arange(b.item(), t.item() + resolution, resolution) for b, t in zip(y_min, y_max)]
-            # grid_points_arr = [np.array([[x, y] for y in y_points[i] for x in x_points[i]]) for i in range(self.batch_size)]
-            # heights_below_body_area = [self.height_map.get_heights_at(grid_points) for grid_points in grid_points_arr]
-            # print("x_points: ", x_points)
-            # print("y_points: ", y_points)
-            # print("grid_points_arr: ", grid_points_arr)
-            # print("heights_below_body_area: ", heights_below_body_area)
-            # max_height_below_body = torch.tensor([max(heights) for heights in heights_below_body_area])
-            # if params[:, 20] - max_height_below_body < 0.1:
-            #     print("max_height_below_body: ", max_height_below_body)
-            #     print("body height: ", params[:, 20])
-            #     body_height_residual = (params[:, 20] - max_height_below_body) ** 2
-            #     print("--> body height is too low")
-            #     print("body_height_residual: ", body_height_residual)
-            #     cost += body_height_residual.sum()
+            base_center = params[:, 18:20] # (batch_size, 2)
+            max_heights_below_body_area = torch.tensor([
+                self.height_map.get_max_height_below_base(center[0].item(), center[1].item())
+                for center in base_center
+            ])
+            body_height_clearance =  params[:, 20] - max_heights_below_body_area
+            body_height_clearance_threshold = torch.tensor(self.BODY_HEIGHT_CLEARANCE_THRESHOLD).repeat(self.batch_size)
             
+            self.logger.debug("\n--- optimizing based on body height ---")
+            self.logger.debug(f"base_center: {base_center}")
+            self.logger.debug(f"current_base_heights_guess: {params[:, 20]}")
+            self.logger.debug(f"max_heights_below_body_area: {max_heights_below_body_area}")
+            self.logger.debug(f"body_height_clearance: {body_height_clearance}")
+            
+            if body_height_clearance < body_height_clearance_threshold:
+                body_height_clearance_residual = (body_height_clearance_threshold - body_height_clearance) ** 2
+                cost += body_height_clearance_residual.sum()
+                self.logger.warning(f"body height is too low")
+                self.logger.debug(f"body_height_clearance_residual: \n{body_height_clearance_residual}")
+            else:
+                self.logger.debug(f"body height is fine")
+                
             if has_eef_goal:
                 cost += eef_pos_residual_squared.sum()
 

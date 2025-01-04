@@ -368,8 +368,8 @@ class Yuna:
             _, next_base_trans_w, next_leg_trans_w, _ = self.optimizer.get_transformations_from_params(next_params)
             next_body_pos_w = next_base_trans_w[batch_idx, :3, 3].numpy()
             next_eef_pos_w = next_leg_trans_w[batch_idx, :, -1, :3, 3].numpy().T
-            # print(f"body waypoint {i} body pos in world frame: {next_body_pos_w}")
-            # print(f"eef waypoint {i} eef pos in world frame: {next_eef_pos_w}")
+            self.optimizer.logger.info(f"next body pos in world frame: {next_body_pos_w}")
+            self.optimizer.logger.info(f"next eef pos in world frame: {next_eef_pos_w}")
             body_waypoints.append(next_body_pos_w)
             legs_waypoints.append(next_eef_pos_w)
             

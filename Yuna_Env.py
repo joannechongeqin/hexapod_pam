@@ -54,7 +54,24 @@ class Map:
     
     def get_heights_at(self, arr_of_xy):
         return np.array([self.get_height_at(x, y) for x, y in arr_of_xy])
-        
+    
+    def get_max_height_below_base(self, center_x, center_y):
+        # estimated body size: 390mm in y direction, 600mm in x direction
+        base_len_x, base_len_y = 0.6, 0.4
+        x_min = center_x - base_len_x / 2
+        x_max = center_x + base_len_x / 2
+        y_min = center_y - base_len_y / 2
+        y_max = center_y + base_len_y / 2
+        x_points = np.arange(x_min, x_max + self.map_resolution, self.map_resolution)
+        y_points = np.arange(y_min, y_max + self.map_resolution, self.map_resolution)
+        grid_points = np.array([[x, y] for y in y_points for x in x_points])
+        heights_below_body_area = self.get_heights_at(grid_points)
+        # print("x_points: ", x_points)
+        # print("y_points: ", y_points)
+        # print("grid_points_arr: ", grid_points_arr)
+        # print("heights_below_body_area: ", heights_below_body_area)
+        return np.max(heights_below_body_area)
+    
     def plot(self):
         plt.figure(figsize=(10, 7))
         plt.imshow(self.height_map, extent=(-self.map_range, self.map_range, -self.map_range, self.map_range), origin='lower', cmap='viridis')
@@ -270,10 +287,17 @@ class YunaEnv:
             self.groundID = p.loadURDF('plane.urdf')
 
         if self.load_fyp_map:
-            self.load_rectangular_body([1.5, 0, 0], [0.8, 1., 0.15], [0.4, 0.58, 0.93, 1])
+            color = [0.4, 0.58, 0.93, 1]
+            self.load_rectangular_body([1., 0, 0], [0.3, .75, 0.2], color)
+            # self.load_rectangular_body([1.6, 0, 0], [0.4, .75, 0.25], color)
             if len(self.goal) > 0:
                 for point in self.goal:
                     p.addUserDebugPoints(pointPositions=self.goal, pointColorsRGB=[[0.5, 0.5, 0.5]], pointSize=20, lifeTime=0)
+            # check body edges
+            # p.addUserDebugPoints(pointPositions=[[0.3, 0.2, 0.15]], pointColorsRGB=[[0, 1, 0]], pointSize=20, lifeTime=0)
+            # p.addUserDebugPoints(pointPositions=[[-0.3, 0.2, 0.15]], pointColorsRGB=[[0, 1, 0]], pointSize=20, lifeTime=0)
+            # p.addUserDebugPoints(pointPositions=[[0.3, -0.2, 0.15]], pointColorsRGB=[[0, 1, 0]], pointSize=20, lifeTime=0)
+            # p.addUserDebugPoints(pointPositions=[[-0.3, -0.2, 0.15]], pointColorsRGB=[[0, 1, 0]], pointSize=20, lifeTime=0)
 
         p.setGravity(0, 0, self.gravity)
         p.changeDynamics(self.groundID, -1, lateralFriction=self.friction)
@@ -444,7 +468,7 @@ class YunaEnv:
     
 if __name__=='__main__':
     # test code
-    yunaenv = YunaEnv(real_robot_control=0)
+    yunaenv = YunaEnv(real_robot_control=0, load_fyp_map=True)
     
     height_map = yunaenv.height_map
     # height_map.plot()
@@ -459,5 +483,5 @@ if __name__=='__main__':
     # [[ 0.5149191   0.5147523   0.05616759  0.05579873 -0.4598487  -0.46019582]
     #  [ 0.23102842 -0.23238657  0.51255405 -0.51356891  0.33082626 -0.33150703]
     #  [ 0.02536965  0.02562286  0.02256538  0.02312707  0.02947116  0.02967863]]
-    time.sleep(3)
+    time.sleep(10)
     yunaenv.close()

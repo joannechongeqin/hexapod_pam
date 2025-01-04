@@ -4,7 +4,7 @@ import torch
 
 GROUND_PLANE = 0.0 # height of ground plane
 PLANE1 = 0.2
-PLANE2 = 0.5
+PLANE2 = 0.6
 
 # leg_idxs = [0, 1]
 # legs_on_ground = [True, True, True, True, True, True]
