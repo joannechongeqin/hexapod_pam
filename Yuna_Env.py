@@ -19,6 +19,7 @@ class Map:
         self.map_resolution = map_resolution
         self.pybullet_on = pybullet_on
         self.height_map = self._generate_height_map()
+        self.eef_height_offset = 0.025 # offset 0.025m from ground (when at initial position, all eef pos are around 0.025m above ground)
 
     def _generate_height_map(self):
         x_coords = np.arange(-self.map_range, self.map_range, self.map_resolution)
@@ -49,7 +50,7 @@ class Map:
         y_idx = int((x + self.map_range) / self.map_resolution)
         x_idx = int((y + self.map_range) / self.map_resolution)
         # print(f"getting height at ({x}, {y}) idx ({x_idx}, {y_idx}) = {self.height_map[x_idx, y_idx]}")
-        return self.height_map[x_idx, y_idx]
+        return self.height_map[x_idx, y_idx] + self.eef_height_offset
     
     def get_heights_at(self, arr_of_xy):
         return np.array([self.get_height_at(x, y) for x, y in arr_of_xy])
@@ -265,10 +266,10 @@ class YunaEnv:
             self.groundID = p.loadURDF('plane.urdf')
 
         if self.fyp_map_on:
-            self.load_rectangular_body([1.5, 0, 0], [0.8, 1., 0.1])
+            self.load_rectangular_body([1.5, 0, 0], [0.8, 1., 0.15])
             if len(self.goal) > 0:
                 for point in self.goal:
-                    p.addUserDebugPoints(pointPositions=self.goal, pointColorsRGB=[[0.5, 0.5, 0.5]], pointSize=10, lifeTime=0) # TODO: make this to accept an array of goal
+                    p.addUserDebugPoints(pointPositions=self.goal, pointColorsRGB=[[0.5, 0.5, 0.5]], pointSize=15, lifeTime=0)
 
         p.setGravity(0, 0, self.gravity)
         p.changeDynamics(self.groundID, -1, lateralFriction=self.friction)

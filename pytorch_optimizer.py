@@ -11,7 +11,6 @@ from static_stability_margin import convex_hull_pam, static_stability_margin, po
 import logging
 from Yuna_Env import Map
 
-logging.basicConfig(level=logging.INFO, format='%(message)s') # format='%(asctime)s - %(levelname)s - %(message)s
 np.set_printoptions(precision=4, suppress=True)
 torch.set_printoptions(precision=4, sci_mode=False)
 
@@ -36,16 +35,26 @@ class PamOptimizer:
         #                      0, 0, -PI / 2, 
         #                      0, 0, PI / 2]*batch_size).reshape((batch_size, 18))
         # (base at origin, eef at ~0.125m below base, last link perpendicular to ground)
-        self.th_0 = torch.tensor([0, -self.PI / 10, -self.PI * 3/5, 
-                            0, self.PI / 10, self.PI * 3/5, 
-                            0, -self.PI / 10, -self.PI * 3/5, 
-                            0, self.PI / 10, self.PI * 3/5, 
-                            0, -self.PI / 10, -self.PI * 3/5, 
-                            0, self.PI / 10, self.PI * 3/5]*batch_size).reshape((batch_size, 18))
+        self.th_0 = torch.tensor([  0, -self.PI / 12, -self.PI * 7/12, 
+                                    0,  self.PI / 12,  self.PI * 7/12, 
+                                    0, -self.PI / 12, -self.PI * 7/12, 
+                                    0,  self.PI / 12,  self.PI * 7/12, 
+                                    0, -self.PI / 12, -self.PI * 7/12, 
+                                    0,  self.PI / 12,  self.PI * 7/12]*batch_size).reshape((batch_size, 18))
 
-        
+        self.logger = self._init_logger()
+
         if self.vis:
             self._load_vis_var()
+
+    def _init_logger(self):
+        logger = logging.getLogger('pam_optimizer')
+        logger.setLevel(logging.DEBUG)
+        console_handler = logging.StreamHandler()
+        file_handler = logging.FileHandler('pam.log')
+        logger.addHandler(console_handler)
+        logger.addHandler(file_handler)
+        return logger
 
     def _load_vis_var(self):
             # load variables for visualization
@@ -188,8 +197,7 @@ class PamOptimizer:
         theta = self.th_0 # torch.rand(batch_size, 18) # joint angles
         base_xyz_w = torch.rand(self.batch_size, 3) # xyz base position
         # z_rot = torch.rand(batch_size, 1) # z rotation angle of base
-        params = torch.cat([theta,base_xyz_w], dim=-1)
-
+        params = torch.cat([theta, base_xyz_w], dim=-1)
         # TODO: MAKE BODY ROTATION (roll pitch yaw) AS PARAMS ALSO?
 
         def cost_function(params):
@@ -207,11 +215,11 @@ class PamOptimizer:
             
             if has_eef_goal:
                 eef_pos_residual_squared = (target_eef_pos_w - goal.get_matrix()[:,:3,3].unsqueeze(0))**2 # calculate squared diff between eef pos and goal pos
-                logging.debug("\n--- optimizing based on distance between eef pos and goal pos ---")
+                self.logger.debug("\n--- optimizing based on distance between eef pos and goal pos ---")
                 # print(f"all_eef_pos_w: {all_eef_pos_w}")
-                logging.debug(f"eef_pos:\n{target_eef_pos_w}")
-                logging.debug(f"goal_pos:\n{goal.get_matrix()[:,:3,3]}")
-                logging.debug(f"eef_pos_residual_squared:\n{eef_pos_residual_squared}")
+                self.logger.debug(f"eef_pos:\n{target_eef_pos_w}")
+                self.logger.debug(f"goal_pos:\n{goal.get_matrix()[:,:3,3]}")
+                self.logger.debug(f"eef_pos_residual_squared:\n{eef_pos_residual_squared}")
 
             # --- optimize based on static stability margin (min dist from the CoM to the edges of support polygon) ---
             # project all points to a ground plane and draw support polygon using legs on ground
@@ -224,18 +232,17 @@ class PamOptimizer:
             # print("body_xys: ", body_xys)
             hull_points = convex_hull_pam(eef_support_xy_pos)
             ssm_cost = static_stability_margin(eef_support_xy_pos, body_xys)
-            logging.debug("\n--- optimizing based on static stability margin ---")
-            logging.debug(f"ssm:\n{ssm_cost}")
+            self.logger.debug("\n--- optimizing based on static stability margin ---")
+            self.logger.debug(f"ssm:\n{ssm_cost}")
             for i in range(body_xys.shape[0]): # Check if each body_xys point is inside the support polygon
                 body_point = body_xys[i]
                 if not point_in_hull(body_point, hull_points[i]):
                     ssm_cost -= 1e6  # Apply penalty for points outside the polygon
-                    logging.warning("body xy not within support polygon")
+                    self.logger.warning("body xy not within support polygon")
 
             # --- optimize based on free legs' height ---
             # free legs = legs not specified for target goal pos (xyz), but heights are fixed to a specific plane
             free_legs = [i for i in range(self.NUM_LEGS) if i not in leg_idxs]
-
             free_legs_height = all_eef_pos_w[:, free_legs, 2, 3]
             free_legs_xy_pos = all_eef_pos_w[:, :, :2, 3]
             heights_at_xy_pos_on_map = self.height_map.get_heights_at(free_legs_xy_pos.detach().numpy().reshape(-1, 2))
@@ -245,28 +252,20 @@ class PamOptimizer:
             # print("heights_at_xy_pos_on_map: ", heights_at_xy_pos_on_map)
             # print("free_legs_plane: ", free_legs_plane)
             # print(f"free_legs_height_residual_squared:\n{free_legs_height_residual_squared}")
-            logging.debug("\n--- optimizing based on free legs' height ---")
-            logging.debug(f"free_legs_height:\n{free_legs_height}")
-            logging.debug(f"free_legs_plane:\n{free_legs_plane}")
-            logging.debug(f"free_legs_height_residual_squared:\n{free_legs_height_residual_squared}")
+            self.logger.debug("\n--- optimizing based on free legs' height ---")
+            self.logger.debug(f"free_legs_xy_pos:\n{free_legs_xy_pos}")
+            self.logger.debug(f"free_legs_height:\n{free_legs_height}")
+            self.logger.debug(f"free_legs_plane:\n{free_legs_plane}")
+            self.logger.debug(f"free_legs_height_residual_squared:\n{free_legs_height_residual_squared}")
 
             # --- optimize such that last link of supported legs is as perpendicular to ground as possible ---
             # when last link perpendicular to ground, x-axis of eef frame (pointing down) parallel to z-axis of world frame (pointing up)
             eef_trans_x_axis_w = all_eef_pos_w[:, eef_support_idxs, :3, 0] # extract x-axis of eef frame
             eef_trans_x_axis_ideal = torch.tensor([0., 0., -1.]).repeat(self.batch_size, len(eef_support_idxs), 1)
             last_link_perpendicular_residual = (eef_trans_x_axis_w - eef_trans_x_axis_ideal) ** 2
-            logging.debug("\n--- optimizing based on last link perpendicularity ---")
-            logging.debug(f"x-axis of eef frame:\n{eef_trans_x_axis_w}")
-            logging.debug(f"last_link_perpendicular_residual:\n{last_link_perpendicular_residual}")
-
-            # --- TODO: OPTIMIZE BODY HEIGHTS? 
-            # !!! currently sometimes body will collide with next plane level
-
-            # --- TODO: check pose validity? ---
-            # pose_penalty = torch.tensor([0 if check_pose_validity(leg_pos=all_eef_pos_w[i,:,:3,3], 
-            #                                                         body_pos=params[i,:3], legs_on_ground=legs_on_ground) 
-            #                                 else 1e6 for i in range(batch_size)])
-            # print("pose_penalty: ", pose_penalty)
+            self.logger.debug("\n--- optimizing based on last link perpendicularity ---")
+            self.logger.debug(f"x-axis of eef frame:\n{eef_trans_x_axis_w}")
+            self.logger.debug(f"last_link_perpendicular_residual:\n{last_link_perpendicular_residual}")
 
             # --- final cost function ---
             cost = (
@@ -276,14 +275,43 @@ class PamOptimizer:
                 # + pose_penalty.sum()
             )
 
+            # --- TODO: OPTIMIZE BODY HEIGHTS? 
+            # !!! currently sometimes body will collide with next plane level
+            # estimated body size: 390mm in y direction, 600mm in x direction
+            # base_center = params[:, 18:20] # base_center:  tensor([[0.6039, 0.8589]], grad_fn=<SliceBackward0>)
+            # base_len_x, base_len_y = 0.6, 0.4
+            # resolution = self.height_map.map_resolution
+            # x_min = base_center[:, 0] - base_len_x / 2
+            # x_max = base_center[:, 0] + base_len_x / 2
+            # y_min = base_center[:, 1] - base_len_y / 2
+            # y_max = base_center[:, 1] + base_len_y / 2
+            # x_points = [np.arange(l.item(), r.item() + resolution, resolution) for l, r in zip(x_min, x_max)]
+            # y_points = [np.arange(b.item(), t.item() + resolution, resolution) for b, t in zip(y_min, y_max)]
+            # grid_points_arr = [np.array([[x, y] for y in y_points[i] for x in x_points[i]]) for i in range(self.batch_size)]
+            # heights_below_body_area = [self.height_map.get_heights_at(grid_points) for grid_points in grid_points_arr]
+            # print("x_points: ", x_points)
+            # print("y_points: ", y_points)
+            # print("grid_points_arr: ", grid_points_arr)
+            # print("heights_below_body_area: ", heights_below_body_area)
+            # max_height_below_body = torch.tensor([max(heights) for heights in heights_below_body_area])
+            # if params[:, 20] - max_height_below_body < 0.1:
+            #     print("max_height_below_body: ", max_height_below_body)
+            #     print("body height: ", params[:, 20])
+            #     body_height_residual = (params[:, 20] - max_height_below_body) ** 2
+            #     print("--> body height is too low")
+            #     print("body_height_residual: ", body_height_residual)
+            #     cost += body_height_residual.sum()
+            
             if has_eef_goal:
                 cost += eef_pos_residual_squared.sum()
 
             if has_base_goal:
                 base_xy_residual = (params[:, 18:20] - target_base_xy) ** 2
                 cost += base_xy_residual.sum()
-                # print("\n--- optimizing based on base xy residual ---")
-                # print(f"base_xy_residual:\n{base_xy_residual}")
+                self.logger.debug("\n--- optimizing based on base xy residual ---")
+                self.logger.debug(f"target_base_xy: {target_base_xy}")
+                self.logger.debug(f"current_base_xy_guess: {params[:, 18:20]}")
+                self.logger.debug(f"base_xy_residual:\n{base_xy_residual}")
 
             return cost
 
@@ -295,9 +323,11 @@ class PamOptimizer:
             max_iter=50,
             disp=2
             )
-        print("result:\n", res.x)
-        print("success?:", res.success)
-        logging.debug(f"Optimization successful?:{res.success}")
+        self.logger.debug(f"success?: {res.success}")
+        if res.success == False:
+            self.logger.warning("Optimization did not converge")
+        self.logger.debug(f"result:\n{res.x}")
+        
         return res.x
 
 
@@ -423,7 +453,7 @@ if __name__=='__main__':
     # print("leg_trans0:\n", leg_trans0)
     # print("eef_trans:\n", eef_trans0)
     # print("eef_pos:\n", eef_trans0[:, :, :3, 3])
-    # optimizer.visualize(base_trans=base_trans0, leg_trans=leg_trans0, batch_size=1, goal=None) # base origin = world origin
+    # optimizer.visualize(base_trans=base_trans0, leg_trans=leg_trans0, goal=None) # base origin = world origin
     
     GROUND_PLANE = 0.0 # height of ground plane
     PLANE1 = 0.1

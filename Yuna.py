@@ -276,12 +276,13 @@ class Yuna:
             self.move_legs_by_pos_in_body_frame([move_by_pos_arr])
         return move_by_pos_arr
     
-    def move_to_next_pose(self, next_body_pos_w, next_eef_pos_w): # next nearest pose
+    def move_to_next_pose(self, next_body_pos_w, next_eef_pos_w, leg_sequence=[4, 5, 0, 1, 2, 3]): # next nearest pose
         # TODO: leg sequence according to movement direction instead of hard code
         # TODO: merge trans_body into swing_leg so it move smoothly
         # TODO: fix potential self collision
         num_legs = 6
-        leg_sequence = [4, 5, 2, 3, 0, 1] # back then middle then front, left then r
+        # leg_sequence = [4, 5, 2, 3, 0, 1] # back then middle then front, left then right
+        # leg_sequence = [4, 5, 0, 1, 2, 3] # back then front then middle, left then right
         initial_body_pos_w = self.env.get_body_pose()[0]
         # self.trans_body_to_in_world_frame(np.array(next_body_pos_w), move=True)
         for i in range(num_legs):
@@ -294,9 +295,10 @@ class Yuna:
     def pam(self, pos, rot, legs_on_ground, leg_idxs, batch_idx=0):
         initial_body_pos = self.env.get_body_pose()[0] # initial body pos in world frame
 
+        self.optimizer.logger.info("----- STARTING PAM -----")
         final_params = self.optimizer.solve_multiple_legs_ik(pos, rot, legs_on_ground, leg_idxs, False)
         _, final_base_trans_w, final_leg_trans_w, _ = self.optimizer.get_transformations_from_params(final_params)
-        print("final pose found.")
+        self.optimizer.logger.info("----- final pose found -----")
 
         if batch_idx >= self.batch_size:
             print("Error: batch_idx should be less than batch_size. Using batch_idx = 0.")
@@ -304,8 +306,8 @@ class Yuna:
         
         final_body_pos_w = final_base_trans_w[batch_idx, :3, 3].numpy()
         final_eef_pos_w = final_leg_trans_w[batch_idx, :, -1, :3, 3].numpy().T
-        # print("Final body pos in world frame: ", final_body_pos_w)
-        # print("final eef pos in world frame: ", final_eef_pos_w)
+        self.optimizer.logger.info(f"final body pos in world frame: {final_body_pos_w}")
+        self.optimizer.logger.info(f"final eef pos in world frame: {final_eef_pos_w}")
         if self.opt_vis:
             self.optimizer.visualize(base_trans=final_base_trans_w, leg_trans=final_leg_trans_w, goal=pos)
         
@@ -320,11 +322,11 @@ class Yuna:
         
         # check distance between intial and final optimized body pose
         dist = np.linalg.norm(final_body_pos_w - initial_body_pos)
-        print("Distance between initial and final body pose: ", dist)
+        self.optimizer.logger.debug(f"Distance between initial and final body pose: {dist}")
 
         # interpolate between initial and final optimized body pose
         num_of_waypoints = round(dist / self.body_interval)
-        print("Number of waypoints: ", num_of_waypoints)
+        self.optimizer.logger.debug(f"Number of waypoints: {num_of_waypoints}")
 
         if num_of_waypoints <= 1:
             self.move_to_next_pose(final_body_pos_w, final_eef_pos_w)
@@ -344,7 +346,7 @@ class Yuna:
             temp_pos = torch.tensor([])
             temp_rot = torch.zeros_like(temp_pos)
             
-            print(f"--- Solving for waypoint {i} ---")
+            self.optimizer.logger.info(f"--- Solving for waypoint {i} ---")
             next_params = self.optimizer.solve_multiple_legs_ik(pos=temp_pos, rot=temp_rot, legs_on_ground=legs_on_ground, leg_idxs=leg_idxs, has_base_goal=True, target_base_xy=torch.tensor(body_waypoint[:2]))
             _, next_base_trans_w, next_leg_trans_w, _ = self.optimizer.get_transformations_from_params(next_params)
             next_body_pos_w = next_base_trans_w[batch_idx, :3, 3].numpy()
@@ -356,15 +358,20 @@ class Yuna:
             
         body_waypoints.append(final_body_pos_w)
         legs_waypoints.append(final_eef_pos_w)
-        print("body waypoints: ", body_waypoints)
-        print("legs waypoints: ", legs_waypoints)
+        self.optimizer.logger.debug(f"initial body pos: {initial_body_pos}")
+        self.optimizer.logger.debug(f"initial eef pos: {self.env.get_leg_pos_in_world_frame()}")
+        self.optimizer.logger.info(f"body waypoints: {body_waypoints}")
+        self.optimizer.logger.info(f"legs waypoints: {legs_waypoints}")
         
         self._plot_hexapod_path(body_waypoints, legs_waypoints)
 
-        for i in range(num_of_waypoints):
+        for i in range(num_of_waypoints-1):
             # TODO: fix move_to_next_pose such that body pose slowly move as each leg move
             self.move_to_next_pose(body_waypoints[i], legs_waypoints[i])
 
+        # TODO: now hardcode last leg sequence, assuming it's known that leg idx 1 is raised last
+        self.move_to_next_pose(final_body_pos_w[-1], final_eef_pos_w[-1], leg_sequence = [4, 5, 2, 3, 0, 1])
+    
     def _plot_hexapod_path(self, body_waypoints, legs_waypoints):
         cmap = plt.get_cmap('tab10')
         num_points = len(body_waypoints)

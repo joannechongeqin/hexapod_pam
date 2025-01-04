@@ -17,7 +17,7 @@ legs_on_ground = [True, False, True, True, True, True]
 pos = torch.tensor([[1.2, -0.3, PLANE2]])
 rot = torch.zeros_like(pos)
 
-yuna = Yuna(real_robot_control=0, pybullet_on=1,  opt_vis=False, goal=pos.tolist())
+yuna = Yuna(real_robot_control=0, pybullet_on=1,  opt_vis=True, goal=pos.tolist())
 yuna.env.camerafollow = False
 
 # yuna.height_map.plot()
