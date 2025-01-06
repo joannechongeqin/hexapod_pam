@@ -14,7 +14,7 @@ eePos = np.array(  [[0.51589,    0.51589,   0.0575,     0.0575,     -0.45839,   
                     [   -h,         -h,         -h,         -h,         -h,         -h]])
 
 class Map:
-    def __init__(self, map_range=10.0, map_resolution=0.05, pybullet_on=False):
+    def __init__(self, map_range=5.0, map_resolution=0.05, pybullet_on=False):
         self.map_range = map_range
         self.map_resolution = map_resolution
         self.pybullet_on = pybullet_on
@@ -72,6 +72,8 @@ class Map:
         # print("heights_below_body_area: ", heights_below_body_area)
         return np.max(heights_below_body_area)
     
+    # TODO: get variance --> such that free legs xy dont optimize so close to edges
+
     def plot(self):
         plt.figure(figsize=(10, 7))
         plt.imshow(self.height_map, extent=(-self.map_range, self.map_range, -self.map_range, self.map_range), origin='lower', cmap='viridis')
@@ -85,7 +87,7 @@ class Map:
 class YunaEnv:
     def __init__(self, real_robot_control=True, pybullet_on=True, visualiser=True, camerafollow=False, 
                     eePos=eePos, goal=[], 
-                    load_fyp_map=True, map_range=10.0, map_resolution=0.05):
+                    load_fyp_map=True, map_range=2.5, map_resolution=0.05):
         self.real_robot_control = real_robot_control
         self.visualiser = visualiser
         self.camerafollow = camerafollow
@@ -289,7 +291,7 @@ class YunaEnv:
         if self.load_fyp_map:
             color = [0.4, 0.58, 0.93, 1]
             self.load_rectangular_body([1., 0, 0], [0.3, .75, 0.2], color)
-            # self.load_rectangular_body([1.6, 0, 0], [0.4, .75, 0.25], color)
+            self.load_rectangular_body([1.3, 0, 0], [0.2, .75, 0.3], color)
             if len(self.goal) > 0:
                 for point in self.goal:
                     p.addUserDebugPoints(pointPositions=self.goal, pointColorsRGB=[[0.5, 0.5, 0.5]], pointSize=20, lifeTime=0)
@@ -471,7 +473,7 @@ if __name__=='__main__':
     yunaenv = YunaEnv(real_robot_control=0, load_fyp_map=True)
     
     height_map = yunaenv.height_map
-    # height_map.plot()
+    height_map.plot()
 
     print("init_base_pos: ", yunaenv.body_pos_w) # (0, 0, 0.1426)
     print("init_base_matrix: ", yunaenv.get_body_matrix())

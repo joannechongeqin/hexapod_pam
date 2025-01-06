@@ -4,7 +4,7 @@ import numpy as np
 from functions import transxy, solveFK, rotx
 import time
 import torch
-from pytorch_optimizer import PamOptimizer
+from pam_optimizer import PamOptimizer
 import matplotlib.pyplot as plt
 
 STEP_HEIGHT = 0.1
@@ -291,24 +291,47 @@ class Yuna:
     #         self.move_legs_by_pos_in_body_frame([move_by_pos_arr])
     #     return move_by_pos_arr
     
-    def move_to_next_pose(self, next_body_pos_w, next_eef_pos_w, leg_sequence=[4, 5, 0, 1, 2, 3]): # next nearest pose
+    def move_to_next_pose(self, next_body_pos_w, next_eef_pos_w, leg_sequence=[4, 5, 0, 1, 2, 3], last=False): # next nearest pose
         # TODO: leg sequence according to movement direction instead of hard code
         # TODO: merge trans_body into swing_leg so it move smoothly
         # TODO: fix potential self collision
         num_legs = 6
+        # initial_eef_pos_w = self.eePos_w().copy() # initial eef pos in world frame
         initial_body_pos_w = self.bodyPos_w().copy() # initial body pos in world frame
         # self.trans_body_to_in_world_frame(np.array(next_body_pos_w), move=True)
+        
+        # if last: # force adjust to all legs on ground first before raising the requiered legs
+        #     last_intermediate_eef = next_eef_pos_w.copy()
+        #     for i in range(num_legs):
+        #         last_intermediate_eef[2, i] = self.height_map.get_height_at(last_intermediate_eef[0, i], last_intermediate_eef[1, i])
+        #     self.move_to_next_pose(next_body_pos_w, last_intermediate_eef)
+
+        # # skip body trans
+        # body_dist = np.linalg.norm(next_body_pos_w - initial_body_pos_w)
+        # skip_body_trans = False
+        # if body_dist < 0.02:
+        #     skip_body_trans = True
+        #     print(f"Body too close to target (distance {body_dist}), skipping body trans")
+
         for i in range(num_legs):
-            if i % 2 == 0: # i = 0, 2, 4 (first, third, fifth legs)
-                intermediate_body_pos_w = initial_body_pos_w + (i/2 + 1) * (next_body_pos_w - initial_body_pos_w) / 3
-                self.trans_body_to_in_world_frame(np.array(intermediate_body_pos_w))            
+            # if current body pos too close to next pose, don't tran_body
+            # if not skip_body_trans and i % 2 == 0: # i = 0, 2, 4 (first, third, fifth legs)
+            intermediate_body_pos_w = initial_body_pos_w + (i/2 + 1) * (next_body_pos_w - initial_body_pos_w) / 3
+            self.trans_body_to_in_world_frame(np.array(intermediate_body_pos_w))
+
             leg_idx = leg_sequence[i] 
 
             # force adjust eef pos to be at least at the height of the next position so that it doesn't push too much on the ground
             height_at_next_pos = self.height_map.get_height_at(next_eef_pos_w[0, leg_idx], next_eef_pos_w[1, leg_idx])
             if next_eef_pos_w[2, leg_idx] < height_at_next_pos:
                 next_eef_pos_w[2, leg_idx] = height_at_next_pos
-          
+
+            # if current eef pos too close to next pose, don't swing leg
+            # eef_dist = np.linalg.norm(next_eef_pos_w[:, leg_idx] - initial_eef_pos_w[:, leg_idx])
+            # if eef_dist < 0.05:
+            #     print(f"Leg {leg_idx} too close to target (distance {eef_dist}), skipping swing")
+            #     continue
+
             self.swing_leg(leg_idx, next_eef_pos_w[:, leg_idx])
 
     def pam(self, pos, rot, legs_on_ground, leg_idxs, batch_idx=0):
@@ -368,8 +391,8 @@ class Yuna:
             _, next_base_trans_w, next_leg_trans_w, _ = self.optimizer.get_transformations_from_params(next_params)
             next_body_pos_w = next_base_trans_w[batch_idx, :3, 3].numpy()
             next_eef_pos_w = next_leg_trans_w[batch_idx, :, -1, :3, 3].numpy().T
-            self.optimizer.logger.info(f"next body pos in world frame: {next_body_pos_w}")
-            self.optimizer.logger.info(f"next eef pos in world frame: {next_eef_pos_w}")
+            self.optimizer.logger.info(f"waypoint {i} body pos in world frame: {next_body_pos_w}")
+            self.optimizer.logger.info(f"waypoint {i} eef pos in world frame: {next_eef_pos_w}")
             body_waypoints.append(next_body_pos_w)
             legs_waypoints.append(next_eef_pos_w)
             
@@ -382,13 +405,17 @@ class Yuna:
         
         self._plot_hexapod_path(body_waypoints, legs_waypoints)
 
+        self.pam_move(body_waypoints, legs_waypoints)
+    
+    def pam_move(self, body_waypoints, legs_waypoints):
+        num_of_waypoints = len(body_waypoints)
         for i in range(num_of_waypoints-1):
             # TODO: fix move_to_next_pose such that body pose slowly move as each leg move
             self.move_to_next_pose(body_waypoints[i], legs_waypoints[i])
 
         # TODO: now hardcode last leg sequence, assuming it's known that leg idx 1 is raised last
-        self.move_to_next_pose(body_waypoints[-1], legs_waypoints[-1], leg_sequence = [4, 5, 2, 3, 0, 1])
-    
+        self.move_to_next_pose(body_waypoints[-1], legs_waypoints[-1], leg_sequence = [4, 5, 2, 3, 0, 1], last=True)
+
     def _plot_hexapod_path(self, body_waypoints, legs_waypoints):
         cmap = plt.get_cmap('tab10')
         num_points = len(body_waypoints)
