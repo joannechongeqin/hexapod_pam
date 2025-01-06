@@ -288,10 +288,15 @@ class YunaEnv:
         else:
             self.groundID = p.loadURDF('plane.urdf')
 
+        p.setGravity(0, 0, self.gravity)
+        p.changeDynamics(self.groundID, -1, lateralFriction=self.friction)
+    
         if self.load_fyp_map:
             color = [0.4, 0.58, 0.93, 1]
-            self.load_rectangular_body([1., 0, 0], [0.3, .75, 0.2], color)
-            self.load_rectangular_body([1.3, 0, 0], [0.2, .75, 0.3], color)
+            self.rec1 = self.load_rectangular_body([1., 0, 0], [0.3, .75, 0.2], color)
+            self.rec2 = self.load_rectangular_body([1.3, 0, 0], [0.2, .75, 0.3], color)
+            p.changeDynamics(self.rec1, -1, lateralFriction=self.friction)
+            p.changeDynamics(self.rec2, -1, lateralFriction=self.friction)
             if len(self.goal) > 0:
                 for point in self.goal:
                     p.addUserDebugPoints(pointPositions=self.goal, pointColorsRGB=[[0.5, 0.5, 0.5]], pointSize=20, lifeTime=0)
@@ -301,8 +306,7 @@ class YunaEnv:
             # p.addUserDebugPoints(pointPositions=[[0.3, -0.2, 0.15]], pointColorsRGB=[[0, 1, 0]], pointSize=20, lifeTime=0)
             # p.addUserDebugPoints(pointPositions=[[-0.3, -0.2, 0.15]], pointColorsRGB=[[0, 1, 0]], pointSize=20, lifeTime=0)
 
-        p.setGravity(0, 0, self.gravity)
-        p.changeDynamics(self.groundID, -1, lateralFriction=self.friction)
+
 
         self.height_map = Map(map_range=self.map_range, map_resolution=self.map_resolution, pybullet_on=self.pybullet_on) # generate a 2.5D height map for the environment
 

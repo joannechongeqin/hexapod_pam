@@ -192,8 +192,9 @@ class Yuna:
         # print("waypoints: ", waypoints)
 
         # plan and execute trajectory
-        traj = self.trajplanner.general_traj(waypoints, total_time=len(waypoints) * 0.8)
-        
+        # traj = self.trajplanner.general_traj(waypoints, total_time=len(waypoints) * 0.8)
+        traj = self.trajplanner.pam_traj(waypoints, total_time=len(waypoints) * 0.4)
+
         counter = 0
         for traj_point in traj:
             # print(traj_point)
@@ -315,9 +316,10 @@ class Yuna:
 
         for i in range(num_legs):
             # if current body pos too close to next pose, don't tran_body
-            # if not skip_body_trans and i % 2 == 0: # i = 0, 2, 4 (first, third, fifth legs)
-            intermediate_body_pos_w = initial_body_pos_w + (i/2 + 1) * (next_body_pos_w - initial_body_pos_w) / 3
-            self.trans_body_to_in_world_frame(np.array(intermediate_body_pos_w))
+            # if not skip_body_trans and 
+            if i % 2 == 0: # i = 0, 2, 4 (first, third, fifth legs)
+                intermediate_body_pos_w = initial_body_pos_w + (i/2 + 1) * (next_body_pos_w - initial_body_pos_w) / 3
+                self.trans_body_to_in_world_frame(np.array(intermediate_body_pos_w))
 
             leg_idx = leg_sequence[i] 
 
@@ -334,11 +336,11 @@ class Yuna:
 
             self.swing_leg(leg_idx, next_eef_pos_w[:, leg_idx])
 
-    def pam(self, pos, rot, legs_on_ground, leg_idxs, batch_idx=0):
+    def pam(self, pos, rot, leg_idxs, batch_idx=0):
         initial_body_pos = self.bodyPos_w().copy() # initial body pos in world frame
 
         self.optimizer.logger.info("----- STARTING PAM -----")
-        final_params = self.optimizer.solve_multiple_legs_ik(pos, rot, legs_on_ground, leg_idxs, False)
+        final_params = self.optimizer.solve_multiple_legs_ik(pos, rot, leg_idxs, False)
         _, final_base_trans_w, final_leg_trans_w, _ = self.optimizer.get_transformations_from_params(final_params)
         self.optimizer.logger.info("----- final pose found -----")
 
@@ -387,7 +389,7 @@ class Yuna:
             temp_rot = torch.zeros_like(temp_pos)
             
             self.optimizer.logger.info(f"\n--- Solving for waypoint {i} ---")
-            next_params = self.optimizer.solve_multiple_legs_ik(pos=temp_pos, rot=temp_rot, legs_on_ground=legs_on_ground, leg_idxs=leg_idxs, has_base_goal=True, target_base_xy=torch.tensor(body_waypoint[:2]))
+            next_params = self.optimizer.solve_multiple_legs_ik(pos=temp_pos, rot=temp_rot, leg_idxs=leg_idxs, has_base_goal=True, target_base_xy=torch.tensor(body_waypoint[:2]))
             _, next_base_trans_w, next_leg_trans_w, _ = self.optimizer.get_transformations_from_params(next_params)
             next_body_pos_w = next_base_trans_w[batch_idx, :3, 3].numpy()
             next_eef_pos_w = next_leg_trans_w[batch_idx, :, -1, :3, 3].numpy().T

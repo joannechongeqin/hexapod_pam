@@ -1,6 +1,9 @@
 import numpy as np
 import hebi
 from functions import solveIK, rotz, transxy
+from scipy.interpolate import CubicHermiteSpline
+import matplotlib.pyplot as plt
+
 # default robot leg end-effecter position w.r.t body frame
 eePos = np.array([[0.51589,    0.51589,   0.0575,     0.0575,     -0.45839,   -0.45839],
                   [0.23145,   -0.23145,   0.5125,     -0.5125,    0.33105,    -0.33105],
@@ -22,6 +25,7 @@ class TrajPlanner:
         self.quad1 = [0, 3] 
         self.quad2 = [1, 4]
         self.quad3 = [2, 5]
+        self.num_legs = 6
         
     def get_loco_traj(self, init_pose, step_len, course, rotation, flag, timestep):
         '''
@@ -187,6 +191,36 @@ class TrajPlanner:
             raise ValueError('Wrong curve type, the available types are: \'swing\' or \'stance\'.')
         
         return traj
+    
+    def pam_traj(self, legs_waypoints, total_time):
+        n = len(legs_waypoints)
+        t = np.linspace(0, total_time, n)
+        m = int(total_time / self.dt) + 1
+        t_new = np.linspace(0, total_time, m)
+        
+        trajectory = np.zeros((m, 3, 6), dtype=np.float32)
+        
+        for leg in range(6):
+            for dim in range(3):
+                y = np.array([legs_waypoints[i][dim, leg] for i in range(n)])
+                dydx = np.gradient(y, t)
+                spline = CubicHermiteSpline(t, y, dydx)
+                trajectory[:, dim, leg] = spline(t_new)
+        
+        return trajectory
+
+    def visualize_trajectory(trajectory):
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        
+        for leg in range(6):
+            ax.plot(trajectory[:, 0, leg], trajectory[:, 1, leg], trajectory[:, 2, leg], label=f'Leg {leg+1}')
+        
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Z')
+        ax.legend()
+        plt.show()
 
     def general_traj(self, waypoints, total_time=1, time_vector=[]):
         '''

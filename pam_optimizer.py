@@ -173,13 +173,12 @@ class PamOptimizer:
     #     return True
 
 
-    def solve_multiple_legs_ik(self, pos, rot, leg_idxs, legs_on_ground, has_base_goal = False, target_base_xy = np.zeros(3)):
+    def solve_multiple_legs_ik(self, pos, rot, leg_idxs, has_base_goal = False, target_base_xy = np.zeros(3)):
         """
         Solves the inverse kinematics for multiple legs, optimizing to reach specified goal positions.
 
         :param pk.Transform3d goal: The desired position and orientation for the leg end-effectors. Shape: [len(leg_idxs), 4, 4].
         :param list leg_idxs: List of leg indices to be optimized.
-        :param list legs_on_ground: List of boolean values indicating whether each leg is on the ground.
         :param int batch_size: The number of samples processed at a time during a pass.
 
         :return: optimized_params
@@ -202,7 +201,6 @@ class PamOptimizer:
         # TODO: MAKE BODY ROTATION (roll pitch yaw) AS PARAMS ALSO?
 
         def cost_function(params):
-            # --- optimize based on distance between eef pos and goal pos ---
             #       rob_tf = Transform3d(pos=tensor([[x, y, z]]), rot=tensor([[quaternion (w,x,y,z) of euler angle (0, 0, z_rot)]])) 
             #       torch.cat(..., dim=-1) concatenates input tensors along last dim
             #       .unsqueeze(dim) adds a new dim of size 1 at the specified position (for proper concatenation)
@@ -214,18 +212,11 @@ class PamOptimizer:
             all_eef_pos_w = torch.einsum("bkl,bilm->bikm",rob_tf_w.get_matrix(),eef_trans_r)
             target_eef_pos_w = all_eef_pos_w[:,leg_idxs,:3,3] # extract pos (xyz) of end-effectors
             
-            if has_eef_goal:
-                eef_pos_residual_squared = (target_eef_pos_w - goal.get_matrix()[:,:3,3].unsqueeze(0))**2 # calculate squared diff between eef pos and goal pos
-                self.logger.debug("\n--- optimizing based on distance between eef pos and goal pos ---")
-                # print(f"all_eef_pos_w: {all_eef_pos_w}")
-                self.logger.debug(f"eef_pos:\n{target_eef_pos_w}")
-                self.logger.debug(f"goal_pos:\n{goal.get_matrix()[:,:3,3]}")
-                self.logger.debug(f"eef_pos_residual_squared:\n{eef_pos_residual_squared}")
-
             # --- optimize based on static stability margin (min dist from the CoM to the edges of support polygon) ---
             # project all points to a ground plane and draw support polygon using legs on ground
             # then minimize distance of body CoM to the centroid of the support polygon
-            eef_support_idxs = [i for i in range(self.NUM_LEGS) if legs_on_ground[i]]
+            # eef_support_idxs = [i for i in range(self.NUM_LEGS) if legs_on_ground[i]]
+            eef_support_idxs = [i for i in range(self.NUM_LEGS) if i not in leg_idxs]
             eef_support_xy_pos = all_eef_pos_w[:, eef_support_idxs, :2, 3]
             body_xys = params[:,18:20] # size = (batch_size, 2)
             # print("eef_support_idxs: ", eef_support_idxs)
@@ -243,11 +234,11 @@ class PamOptimizer:
 
             # --- optimize based on free legs' height ---
             # free legs = legs not specified for target goal pos (xyz), but heights are fixed to a specific plane
-            free_legs = [i for i in range(self.NUM_LEGS) if i not in leg_idxs]
-            free_legs_height = all_eef_pos_w[:, free_legs, 2, 3]
+            # free_legs = [i for i in range(self.NUM_LEGS) if i not in leg_idxs]
+            free_legs_height = all_eef_pos_w[:, eef_support_idxs, 2, 3]
             free_legs_xy_pos = all_eef_pos_w[:, :, :2, 3]
             heights_at_xy_pos_on_map = self.height_map.get_heights_at(free_legs_xy_pos.detach().numpy().reshape(-1, 2))
-            free_legs_plane = torch.tensor(heights_at_xy_pos_on_map.reshape(self.batch_size, -1))[:, free_legs]
+            free_legs_plane = torch.tensor(heights_at_xy_pos_on_map.reshape(self.batch_size, -1))[:, eef_support_idxs]
             free_legs_height_residual_squared = (free_legs_height - free_legs_plane) ** 2
             # print("free_legs_xy_pos:", free_legs_xy_pos)
             # print("heights_at_xy_pos_on_map: ", heights_at_xy_pos_on_map)
@@ -276,8 +267,7 @@ class PamOptimizer:
                 # + pose_penalty.sum()
             )
 
-            # --- TODO: OPTIMIZE BODY HEIGHTS? 
-            # !!! currently sometimes body will collide with next plane level
+            # --- optimize based on body height such that there is enough clearance below it ---
             # estimated body size: 390mm in y direction, 600mm in x direction
             base_center = params[:, 18:20] # (batch_size, 2)
             max_heights_below_body_area = torch.tensor([
@@ -300,8 +290,15 @@ class PamOptimizer:
                 self.logger.debug(f"body_height_clearance_residual: \n{body_height_clearance_residual}")
             else:
                 self.logger.debug(f"body height is fine")
-                
+            
+            # --- optimize based on distance between eef pos and goal pos ---
             if has_eef_goal:
+                eef_pos_residual_squared = (target_eef_pos_w - goal.get_matrix()[:,:3,3].unsqueeze(0))**2 # calculate squared diff between eef pos and goal pos
+                self.logger.debug("\n--- optimizing based on distance between eef pos and goal pos ---")
+                # print(f"all_eef_pos_w: {all_eef_pos_w}")
+                self.logger.debug(f"eef_pos:\n{target_eef_pos_w}")
+                self.logger.debug(f"goal_pos:\n{goal.get_matrix()[:,:3,3]}")
+                self.logger.debug(f"eef_pos_residual_squared:\n{eef_pos_residual_squared}")
                 cost += eef_pos_residual_squared.sum()
 
             if has_base_goal:

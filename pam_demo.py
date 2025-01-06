@@ -1,20 +1,19 @@
 from Yuna import Yuna
 import time
 import torch
+import numpy as np
 
 GROUND_PLANE = 0.0 # height of ground plane
 PLANE1 = 0.2
 PLANE2 = 0.6
 
 # leg_idxs = [0, 1]
-# legs_on_ground = [True, True, True, True, True, True]
 # pos = torch.tensor([[1.2, 0.3, PLANE2],
 #                     [1.2, -0.3, PLANE2]])
 # rot = torch.zeros_like(pos)
 
 leg_idxs = [1]
-legs_on_ground = [True, False, True, True, True, True]
-pos = torch.tensor([[1.2, -0.3, PLANE2]])
+pos = torch.tensor([[1.4, -0.3, PLANE2]])
 rot = torch.zeros_like(pos)
 
 yuna = Yuna(real_robot_control=0, pybullet_on=1, opt_vis=True, load_fyp_map=True, goal=pos.tolist())
@@ -22,7 +21,39 @@ yuna.env.camerafollow = False
 
 # yuna.height_map.plot()
 
-yuna.pam(pos, rot, leg_idxs, legs_on_ground)
+yuna.pam(pos, rot, leg_idxs)
+
+# body_waypoints = np.array([
+#     [0.1419, 0.019, 0.1654],
+#     [0.2829, 0.0294, 0.2745],
+#     [0.4245, 0.0462, 0.2988],
+#     [0.5641, 0.0559, 0.2803],
+#     [0.7079, 0.0742, 0.37],
+#     [0.848, 0.0906, 0.3968]
+# ], dtype=np.float32)
+
+# legs_waypoints = np.array([
+#     [[0.6388, 0.6382, 0.1753, 0.181, -0.3125, -0.3161],
+#      [0.2601, -0.2203, 0.5248, -0.4851, 0.3358, -0.2934],
+#      [0.0259, 0.0255, 0.0243, 0.0265, 0.0246, 0.0261]],
+#     [[0.7441, 0.7435, 0.3383, 0.3413, -0.1741, -0.1797],
+#      [0.2763, -0.2182, 0.5432, -0.4821, 0.3463, -0.2899],
+#      [0.2081, 0.2088, 0.0315, 0.0356, 0.0307, 0.0358]],
+#     [[0.8851, 0.8938, 0.4752, 0.4675, -0.0413, -0.035],
+#      [0.3035, -0.2112, 0.5611, -0.4687, 0.3638, -0.2691],
+#      [0.2181, 0.2166, 0.0418, 0.0375, 0.0426, 0.035]],
+#     [[1.0231, 1.0228, 0.6003, 0.5905, 0.0983, 0.1096],
+#      [0.3169, -0.2116, 0.5687, -0.4565, 0.3766, -0.2713],
+#      [0.2093, 0.2096, 0.0538, 0.0467, 0.0638, 0.0591]],
+#     [[1.1638, 1.1594, 0.7411, 0.7434, 0.255, 0.2535],
+#      [0.3321, -0.1882, 0.5811, -0.4313, 0.3763, -0.2293],
+#      [0.3065, 0.3068, 0.2233, 0.2223, 0.0425, 0.0388]],
+#     [[1.3426, 1.4028, 0.9865, 1.0742, 0.4148, 0.4699],
+#      [0.1473, -0.2984, 0.5589, -0.3451, 0.3898, -0.2757],
+#      [0.3233, 0.5976, 0.2491, 0.2275, 0.0341, 0.0412]]
+# ], dtype=np.float32)
+
+# yuna.pam_move(body_waypoints, legs_waypoints)
 
 time.sleep(10)
 
