@@ -223,13 +223,13 @@ class PamOptimizer:
             # print("eef_support_xy_pos: ", eef_support_xy_pos)
             # print("body_xys: ", body_xys)
             hull_points = convex_hull_pam(eef_support_xy_pos)
-            ssm_cost = static_stability_margin(eef_support_xy_pos, body_xys)
+            ssm_cost = - static_stability_margin(eef_support_xy_pos, body_xys).mean()
             self.logger.debug("\n--- optimizing based on static stability margin ---")
             self.logger.debug(f"ssm:\n{ssm_cost}")
             for i in range(body_xys.shape[0]): # Check if each body_xys point is inside the support polygon
                 body_point = body_xys[i]
                 if not point_in_hull(body_point, hull_points[i]):
-                    ssm_cost -= 1e6  # Apply penalty for points outside the polygon
+                    ssm_cost = - 1e6  # Apply penalty for points outside the polygon
                     self.logger.warning("body xy not within support polygon")
 
             # --- optimize based on free legs' height ---
@@ -261,8 +261,8 @@ class PamOptimizer:
 
             # --- final cost function ---
             cost = (
-                free_legs_height_residual_squared.sum() -
-                ssm_cost.mean() +
+                free_legs_height_residual_squared.sum() +
+                ssm_cost +
                 last_link_perpendicular_residual.sum()
                 # + pose_penalty.sum()
             )
