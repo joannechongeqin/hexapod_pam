@@ -3,26 +3,20 @@ import time
 import torch
 import numpy as np
 
-GROUND_PLANE = 0.0 # height of ground plane
-PLANE1 = 0.2
-PLANE2 = 0.6
+leg_idxs = [1]
+pos = torch.tensor([[1.4, -0.3, 0.6]])
 
 # leg_idxs = [0, 1]
-# pos = torch.tensor([[1.2, 0.3, PLANE2],
-#                     [1.2, -0.3, PLANE2]])
-# rot = torch.zeros_like(pos)
-
-leg_idxs = [1]
-pos = torch.tensor([[1.4, -0.3, PLANE2]])
-rot = torch.zeros_like(pos)
+# pos = torch.tensor([[1.4, 0.3, 0.7], [1.4, -0.3, 0.6]])
 
 yuna = Yuna(real_robot_control=0, pybullet_on=1, opt_vis=True, load_fyp_map=True, goal=pos.tolist())
 yuna.env.camerafollow = False
 
 # yuna.height_map.plot()
 
-yuna.pam(pos, rot, leg_idxs)
+yuna.pam(pos, leg_idxs)
 
+# --- SET 1 ---
 # body_waypoints = np.array([
 #     [0.1419, 0.019, 0.1654],
 #     [0.2829, 0.0294, 0.2745],
@@ -52,6 +46,27 @@ yuna.pam(pos, rot, leg_idxs)
 #      [0.1473, -0.2984, 0.5589, -0.3451, 0.3898, -0.2757],
 #      [0.3233, 0.5976, 0.2491, 0.2275, 0.0341, 0.0412]]
 # ], dtype=np.float32)
+
+# body waypoints: [array([0.144 , 0.0105, 0.1697], dtype=float32), array([0.2892, 0.0186, 0.2529], dtype=float32), array([0.43  , 0.0254, 0.276 ], dtype=float32), array([0.5682, 0.028 , 0.2867], dtype=float32), array([0.7134, 0.0379, 0.357 ], dtype=float32), array([0.8562, 0.0454, 0.3976], dtype=float32)]
+# legs waypoints: [array([[ 0.6389,  0.6406,  0.1834,  0.1799, -0.3162, -0.3131],
+#        [ 0.2524, -0.2316,  0.5183, -0.4986,  0.3228, -0.3019],
+#        [ 0.0208,  0.0333,  0.0232,  0.0232,  0.022 ,  0.0201]],
+#       dtype=float32), array([[ 0.7475,  0.7525,  0.3302,  0.3256, -0.1788, -0.1756],
+#        [ 0.2809, -0.2435,  0.5307, -0.4943,  0.3275, -0.2919],
+#        [ 0.1841,  0.1816,  0.0435,  0.0474,  0.05  ,  0.0487]],
+#       dtype=float32), array([[ 0.8983,  0.88  ,  0.4609,  0.4809, -0.0341, -0.0282],
+#        [ 0.2811, -0.2567,  0.5426, -0.4834,  0.3371, -0.2944],
+#        [ 0.2041,  0.1996,  0.0558,  0.0408,  0.0557,  0.0542]],
+#       dtype=float32), array([[ 1.0286,  1.031 ,  0.6148,  0.6143,  0.1096,  0.1033],
+#        [ 0.2879, -0.2256,  0.5402, -0.4893,  0.3464, -0.2874],
+#        [ 0.2201,  0.2205,  0.0335,  0.0477,  0.0417,  0.047 ]],
+#       dtype=float32), array([[ 1.1712,  1.1578,  0.749 ,  0.7322,  0.249 ,  0.2622],
+#        [ 0.2919, -0.2279,  0.5438, -0.4706,  0.3338, -0.2776],
+#        [ 0.3009,  0.3038,  0.212 ,  0.1999,  0.0629,  0.0601]],
+#       dtype=float32), array([[ 1.3553,  1.399 ,  0.9945,  1.0821,  0.4212,  0.4766],
+#        [ 0.0946, -0.3093,  0.517 , -0.3901,  0.3458, -0.3248],
+#        [ 0.3116,  0.5886,  0.2487,  0.2232,  0.0398,  0.0515]],
+#       dtype=float32)]
 
 # yuna.pam_move(body_waypoints, legs_waypoints)
 

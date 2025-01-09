@@ -336,10 +336,11 @@ class Yuna:
 
             self.swing_leg(leg_idx, next_eef_pos_w[:, leg_idx])
 
-    def pam(self, pos, rot, leg_idxs, batch_idx=0):
+    def pam(self, pos, leg_idxs, batch_idx=0):
         initial_body_pos = self.bodyPos_w().copy() # initial body pos in world frame
 
         self.optimizer.logger.info("----- STARTING PAM -----")
+        rot = torch.zeros_like(pos)
         final_params = self.optimizer.solve_multiple_legs_ik(pos, rot, leg_idxs, False)
         _, final_base_trans_w, final_leg_trans_w, _ = self.optimizer.get_transformations_from_params(final_params)
         self.optimizer.logger.info("----- final pose found -----")

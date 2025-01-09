@@ -298,8 +298,7 @@ class YunaEnv:
             p.changeDynamics(self.rec1, -1, lateralFriction=self.friction)
             p.changeDynamics(self.rec2, -1, lateralFriction=self.friction)
             if len(self.goal) > 0:
-                for point in self.goal:
-                    p.addUserDebugPoints(pointPositions=self.goal, pointColorsRGB=[[0.5, 0.5, 0.5]], pointSize=20, lifeTime=0)
+                p.addUserDebugPoints(pointPositions=self.goal, pointColorsRGB=[[0.5, 0.5, 0.5]]*len(self.goal), pointSize=20, lifeTime=0)
             # check body edges
             # p.addUserDebugPoints(pointPositions=[[0.3, 0.2, 0.15]], pointColorsRGB=[[0, 1, 0]], pointSize=20, lifeTime=0)
             # p.addUserDebugPoints(pointPositions=[[-0.3, 0.2, 0.15]], pointColorsRGB=[[0, 1, 0]], pointSize=20, lifeTime=0)
