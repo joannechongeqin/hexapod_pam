@@ -1,7 +1,7 @@
 # README
 
 ## Pose Assisted Manipulation (PAM) of Hexapod
-To design advanced poses for a hexapod robot to extend its manipulators and body, allowing it to access elevated objectives beyond reach of conventional ground-based poses
+Hexapod robots offer superior stability on uneven terrain compared to quadruped and biped robots. Additionally, they can perform manipulation tasks in challenging environments by utilizing their extra legs. However, the size of the robot often limits the range of its manipulation capabilities. This project aims to design advanced poses for a hexapod robot to extend its manipulators and body, allowing it to access elevated objectives beyond reach of conventional ground-based poses. 
 
 ## Yuna Configuration
 
