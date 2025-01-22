@@ -292,9 +292,13 @@ class YunaEnv:
         p.changeDynamics(self.groundID, -1, lateralFriction=self.friction)
     
         if self.load_fyp_map:
-            color = [0.4, 0.58, 0.93, 1]
-            self.rec1 = self.load_rectangular_body([1., 0, 0], [0.3, .75, 0.2], color)
-            self.rec2 = self.load_rectangular_body([1.3, 0, 0], [0.2, .75, 0.3], color)
+            step_color = [0.4, 0.58, 0.93, 1]
+            wall_color = [0.5, 0.5, 0.5, 1]
+            button_color = [1, 0, 0, 1]
+            self.rec1 = self.load_rectangular_body([1., 0, 0], [0.3, .75, 0.2], step_color)
+            self.rec2 = self.load_rectangular_body([1.3, 0, 0], [0.2, .75, 0.3], step_color)
+            self.wall = self.load_rectangular_body([1.44, 0, 0], [0.025, .75, 1.5], wall_color)
+            self.button = self.load_rectangular_body([1.42, -0.3, 0.6], [0.01, .05, 0.05], button_color)
             p.changeDynamics(self.rec1, -1, lateralFriction=self.friction)
             p.changeDynamics(self.rec2, -1, lateralFriction=self.friction)
             if len(self.goal) > 0:
