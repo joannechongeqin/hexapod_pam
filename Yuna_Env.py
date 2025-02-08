@@ -247,8 +247,8 @@ class YunaEnv:
     def load_rectangular_body(self, position, size, color):
         wall_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=size)
         visual_shape = p.createVisualShape(p.GEOM_BOX, halfExtents=size, rgbaColor=color)
-        wall_id = p.createMultiBody(baseCollisionShapeIndex=wall_shape, basePosition=position, baseVisualShapeIndex=visual_shape)
-        return wall_id
+        rec_id = p.createMultiBody(baseCollisionShapeIndex=wall_shape, basePosition=position, baseVisualShapeIndex=visual_shape)
+        return rec_id
 
     def _load_env(self):
         '''
@@ -293,7 +293,7 @@ class YunaEnv:
     
         if self.load_fyp_map:
             step_color = [0.4, 0.58, 0.93, 1]
-            wall_color = [0.5, 0.5, 0.5, 1]
+            wall_color = [0.286, 0.435, 0.729, 1]
             button_color = [1, 0, 0, 1]
             self.rec1 = self.load_rectangular_body([1., 0, 0], [0.3, .75, 0.2], step_color)
             self.rec2 = self.load_rectangular_body([1.3, 0, 0], [0.2, .75, 0.3], step_color)

@@ -7,9 +7,12 @@ import torch
 from pam_optimizer import PamOptimizer
 import matplotlib.pyplot as plt
 
-STEP_HEIGHT = 0.1
+STEP_HEIGHT = 0.08
 GROUND_PLANE = 0.0
+NUM_LEGS = 6
 h = 0.12
+RAISE_THRES = 0.1
+
 eePos = np.array(  [[0.51589,    0.51589,   0.0575,     0.0575,     -0.45839,   -0.45839],
                     [0.23145,   -0.23145,   0.5125,     -0.5125,    0.33105,    -0.33105],
                     [   -h,         -h,         -h,         -h,         -h,         -h]])
@@ -143,13 +146,15 @@ class Yuna:
         body_mat[:3, 3] = self.bodyPos_w()
         return body_mat
     
-    def _eef_world_to_body_frame(self, pos_w):
-        WTB = self.get_body_matrix()
+    def _eef_world_to_body_frame(self, pos_w, WTB = None):
+        if WTB is None:
+            WTB = self.get_body_matrix()
         BTW = np.linalg.inv(WTB)
         return np.dot(BTW, np.vstack((pos_w, np.ones((1, 6)))))[0:3, :] # BpE = BTW * WpE
     
-    def _eef_body_to_world_frame(self, pos_b):
-        WTB = self.get_body_matrix()
+    def _eef_body_to_world_frame(self, pos_b, WTB = None):
+        if WTB is None:
+            WTB = self.get_body_matrix()
         return np.dot(WTB, np.vstack((pos_b, np.ones((1, 6)))))[0:3, :]
 
     def eePos_b(self): 
@@ -166,22 +171,22 @@ class Yuna:
         # return self.bodyPos # calculated
         return np.array(self.env.body_pos_w) # based on pybullet
     
-    def swing_leg(self, leg_index, target_pos):
-        '''
-        :param leg_index: The index of the leg to move
-        :param target_pos: The target position of the leg in the world frame
-        '''
-        pos_w0 = self.eePos_w().copy()  # initial leg position in world frame
-        target_leg_midpoint = (pos_w0[:, leg_index] + target_pos) / 2  # use xy midpoint
-        target_leg_midpoint[2] = max(pos_w0[2, leg_index], target_pos[2]) + STEP_HEIGHT  # raise
-        pos_w1 = pos_w0.copy()
-        pos_w1[:, leg_index] = target_leg_midpoint
-        pos_w2 = pos_w0.copy()
-        pos_w2[:, leg_index] = target_pos
+    # def swing_leg(self, leg_index, target_pos):
+    #     '''
+    #     :param leg_index: The index of the leg to move
+    #     :param target_pos: The target position of the leg in the world frame
+    #     '''
+    #     pos_w0 = self.eePos_w().copy()  # initial leg position in world frame
+    #     target_leg_midpoint = (pos_w0[:, leg_index] + target_pos) / 2  # use xy midpoint
+    #     target_leg_midpoint[2] = max(pos_w0[2, leg_index], target_pos[2]) + STEP_HEIGHT  # raise
+    #     pos_w1 = pos_w0.copy()
+    #     pos_w1[:, leg_index] = target_leg_midpoint
+    #     pos_w2 = pos_w0.copy()
+    #     pos_w2[:, leg_index] = target_pos
 
-        waypoints = [pos_w1, pos_w2]
-        # print("waypoints: ", waypoints)
-        self.move_legs_to_pos_in_world_frame(waypoints)
+    #     waypoints = [pos_w1, pos_w2]
+    #     # print("waypoints: ", waypoints)
+    #     self.move_legs_to_pos_in_world_frame(waypoints)
 
     def move_legs_to_pos_in_body_frame(self, target_pos_arr):
         '''
@@ -193,7 +198,7 @@ class Yuna:
 
         # plan and execute trajectory
         # traj = self.trajplanner.general_traj(waypoints, total_time=len(waypoints) * 0.8)
-        traj = self.trajplanner.pam_traj(waypoints, total_time=len(waypoints) * 0.4)
+        traj = self.trajplanner.pam_traj(waypoints, total_time=len(waypoints) * 0.6)
 
         counter = 0
         for traj_point in traj:
@@ -291,50 +296,6 @@ class Yuna:
     #     if move:
     #         self.move_legs_by_pos_in_body_frame([move_by_pos_arr])
     #     return move_by_pos_arr
-    
-    def move_to_next_pose(self, next_body_pos_w, next_eef_pos_w, leg_sequence=[4, 5, 0, 1, 2, 3], last=False): # next nearest pose
-        # TODO: leg sequence according to movement direction instead of hard code
-        # TODO: merge trans_body into swing_leg so it move smoothly
-        # TODO: fix potential self collision
-        num_legs = 6
-        # initial_eef_pos_w = self.eePos_w().copy() # initial eef pos in world frame
-        initial_body_pos_w = self.bodyPos_w().copy() # initial body pos in world frame
-        # self.trans_body_to_in_world_frame(np.array(next_body_pos_w), move=True)
-        
-        # if last: # force adjust to all legs on ground first before raising the requiered legs
-        #     last_intermediate_eef = next_eef_pos_w.copy()
-        #     for i in range(num_legs):
-        #         last_intermediate_eef[2, i] = self.height_map.get_height_at(last_intermediate_eef[0, i], last_intermediate_eef[1, i])
-        #     self.move_to_next_pose(next_body_pos_w, last_intermediate_eef)
-
-        # # skip body trans
-        # body_dist = np.linalg.norm(next_body_pos_w - initial_body_pos_w)
-        # skip_body_trans = False
-        # if body_dist < 0.02:
-        #     skip_body_trans = True
-        #     print(f"Body too close to target (distance {body_dist}), skipping body trans")
-
-        for i in range(num_legs):
-            # if current body pos too close to next pose, don't tran_body
-            # if not skip_body_trans and 
-            if i % 2 == 0: # i = 0, 2, 4 (first, third, fifth legs)
-                intermediate_body_pos_w = initial_body_pos_w + (i/2 + 1) * (next_body_pos_w - initial_body_pos_w) / 3
-                self.trans_body_to_in_world_frame(np.array(intermediate_body_pos_w))
-
-            leg_idx = leg_sequence[i] 
-
-            # force adjust eef pos to be at least at the height of the next position so that it doesn't push too much on the ground
-            height_at_next_pos = self.height_map.get_height_at(next_eef_pos_w[0, leg_idx], next_eef_pos_w[1, leg_idx])
-            if next_eef_pos_w[2, leg_idx] < height_at_next_pos:
-                next_eef_pos_w[2, leg_idx] = height_at_next_pos
-
-            # if current eef pos too close to next pose, don't swing leg
-            # eef_dist = np.linalg.norm(next_eef_pos_w[:, leg_idx] - initial_eef_pos_w[:, leg_idx])
-            # if eef_dist < 0.05:
-            #     print(f"Leg {leg_idx} too close to target (distance {eef_dist}), skipping swing")
-            #     continue
-
-            self.swing_leg(leg_idx, next_eef_pos_w[:, leg_idx])
 
     def pam(self, pos, leg_idxs, batch_idx=0):
         initial_body_pos = self.bodyPos_w().copy() # initial body pos in world frame
@@ -385,7 +346,6 @@ class Yuna:
             # print(f"Body waypoint {i}: {body_waypoint}")
             
             leg_idxs = []
-            legs_on_ground = [True] * 6
             temp_pos = torch.tensor([])
             temp_rot = torch.zeros_like(temp_pos)
             
@@ -413,11 +373,54 @@ class Yuna:
     def pam_move(self, body_waypoints, legs_waypoints):
         num_of_waypoints = len(body_waypoints)
         for i in range(num_of_waypoints-1):
-            # TODO: fix move_to_next_pose such that body pose slowly move as each leg move
-            self.move_to_next_pose(body_waypoints[i], legs_waypoints[i])
+            self.move_to_next_pose_tripod_gait(body_waypoints[i], legs_waypoints[i])
 
         # TODO: now hardcode last leg sequence, assuming it's known that leg idx 1 is raised last
-        self.move_to_next_pose(body_waypoints[-1], legs_waypoints[-1], leg_sequence = [4, 5, 2, 3, 0, 1], last=True)
+        self.move_to_next_pose_wave_gait(body_waypoints[-1], legs_waypoints[-1], leg_sequence = [2, 3, 4, 5, 0, 1])
+
+    def move_to_next_pose_tripod_gait(self, next_body_pos_w, next_eef_pos_w):
+        # ASSUMING ALWAYS ALL SIX LEGS ON GROUND WHEN MOVING WITH TRIPOD GAIT
+        initial_body_pos_w = self.bodyPos_w().copy() # initial body pos in world frame
+        
+        for leg_idx in range(NUM_LEGS):
+            # pre processing, force adjust eef pos to be at least at the height of the next position 
+            # so that it doesn't push too much on the ground / too high and not touching the gorund
+            height_at_next_pos = self.height_map.get_height_at(next_eef_pos_w[0, leg_idx], next_eef_pos_w[1, leg_idx])
+            next_eef_pos_w[2, leg_idx] = height_at_next_pos
+
+        body_keyframe_w, leg_keyframe_w = self.trajplanner.pam_tripod_keyframe(initial_body_pos_w, next_body_pos_w, self.eePos_w(), next_eef_pos_w)
+        leg_keyframe_b = self.keyframe_b_to_w(body_keyframe_w, leg_keyframe_w)
+        self.move_legs_to_pos_in_body_frame(leg_keyframe_b)
+
+    def move_to_next_pose_wave_gait(self, next_body_pos_w, next_eef_pos_w, leg_sequence=[0, 1, 2, 3, 4, 5]):
+        # MAINLY USED TO MOVE TO FINAL POSE (LAST STEP)
+        initial_body_pos_w = self.bodyPos_w().copy() # initial body pos in world frame
+        support_legs = [True] * 6
+        
+        for leg_idx in range(NUM_LEGS):
+            height_at_next_pos = self.height_map.get_height_at(next_eef_pos_w[0, leg_idx], next_eef_pos_w[1, leg_idx])
+            if next_eef_pos_w[2, leg_idx] - height_at_next_pos > RAISE_THRES: # skip those which legs are intentionally raised
+                support_legs[leg_idx] = False
+            else:
+                next_eef_pos_w[2, leg_idx] = height_at_next_pos
+        body_keyframe_w, leg_keyframe_w = self.trajplanner.pam_wave_keyframe(initial_body_pos_w, next_body_pos_w, self.eePos_w(), next_eef_pos_w, support_legs=support_legs, leg_sequence=leg_sequence)
+        leg_keyframe_b = self.keyframe_b_to_w(body_keyframe_w, leg_keyframe_w)
+        self.move_legs_to_pos_in_body_frame(leg_keyframe_b)
+
+    def keyframe_b_to_w(self, body_keyframe_w, leg_keyframe_w):
+        # TODO: if add rotation need include rotation matrix
+        leg_keyframe_b = []
+        keyframe_len = len(body_keyframe_w)
+        for i in range(1, keyframe_len):
+            # rot_mat = self.env.getMatrixFromQuaternion(self.bodyOrn)
+            wTb = np.eye(4) # homogeneous transformation matrix of body frame wrt world frame
+            # wTb[:3, :3] = rot_mat
+            wTb[:3, 3] = body_keyframe_w[i]
+            leg_pos_w = leg_keyframe_w[i]
+            leg_keyframe_b.append(self._eef_world_to_body_frame(leg_pos_w, wTb))
+        # print("leg_keyframe_b: ", leg_keyframe_b)
+        return leg_keyframe_b
+    
 
     def _plot_hexapod_path(self, body_waypoints, legs_waypoints):
         cmap = plt.get_cmap('tab10')
@@ -453,42 +456,6 @@ class Yuna:
         ax.legend()
         plt.show()
 
-
-    # def wall_transition_step_ground_leg(self, step_len, leg4_step_half=False, raise_h=0.05):
-    #     '''
-    #     assuming stepping sideway to left, ground legs are at the right side
-    #     '''
-    #     for leg_index in [1, 3, 5]:
-    #         if leg4_step_half and leg_index == 3:
-    #             final_step_len = step_len / 2
-    #         else:
-    #             final_step_len = step_len
-    #         raise_leg = np.zeros((3,6))
-    #         raise_leg[:, leg_index] = [0, final_step_len/2, raise_h]
-    #         step_leg = np.zeros((3,6))
-    #         step_leg[:, leg_index] = [0, final_step_len/2, -raise_h]
-    #         self.move_legs_by_pos_in_world_frame([raise_leg, step_leg])
-    
-    # def wall_transition_first_step_wall_leg(self, step_height, wall_dist):
-    #     '''
-    #     :param step_height: The height of the first step
-    #     :param wall_dist: The distance of the first step to the wall [leg1, leg3, leg5]
-    #     assuming stepping sideway to left, wall legs are at the left side
-    #     '''
-    #     for leg_index in [0, 2, 4]:
-    #         raise_leg = np.zeros((3,6))
-    #         raise_leg[:, leg_index] = [0, 0, step_height]
-    #         step_leg = np.zeros((3,6))
-    #         step_leg[:, leg_index] = [0, wall_dist, 0]
-    #         self.move_legs_by_pos_in_world_frame([raise_leg, step_leg])
-    
-    # def wall_transition_step_wall_leg(self, step_len, clearance=0.06):
-    #     for leg_index in [0, 2, 4]:
-    #         raise_leg = np.zeros((3,6))
-    #         raise_leg[:, leg_index] = [0, -clearance/2, step_len/2]
-    #         step_leg = np.zeros((3,6))
-    #         step_leg[:, leg_index] = [0, +clearance/2, step_len/2]
-    #         self.move_legs_by_pos_in_world_frame([raise_leg, step_leg])
 
     def disconnect(self):
         '''

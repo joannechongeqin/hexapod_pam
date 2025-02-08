@@ -208,6 +208,83 @@ class TrajPlanner:
                 trajectory[:, dim, leg] = spline(t_new)
         
         return trajectory
+    
+    def pam_tripod_keyframe(self, body_w_init, body_w_final, leg_w_init, leg_w_final, raise_height=0.1):
+        # split into 4 keyframes where body moves 1/4 forward each time
+        quarter_body_trans = (body_w_final - body_w_init) / 4
+        body_keyframe_w = [body_w_init]
+        for i in range(4): 
+            body_keyframe_w.append(body_keyframe_w[-1] + quarter_body_trans)
+
+        leg_keyframe_w = [leg_w_init]
+        
+        mid = (leg_w_init + leg_w_final) / 2
+        # 1. raise first tripod set
+        set1 = leg_w_init.copy()
+        for i in self.tripod1: # raise tripod 1 legs
+            set1[:, i] = mid[:, i] 
+            set1[2, i] = max(set1[2, i], leg_w_final[2, i]) + raise_height
+        leg_keyframe_w.append(set1)
+        
+        # 2. lower first tripod set
+        set2 =  set1.copy()
+        for i in self.tripod1: # lower tripod 1 legs
+            set2[:, i] = leg_w_final[:, i]
+        leg_keyframe_w.append(set2)
+
+        # 3. raise second tripod set
+        set3 = set2.copy()
+        for i in self.tripod2: # raise tripod 2 legs
+            set3[:, i] = mid[:, i]
+            set3[2, i] = max(set3[2, i], leg_w_final[2, i]) + raise_height
+        leg_keyframe_w.append(set3)
+
+        # 4. lower second tripod set
+        leg_keyframe_w.append(leg_w_final)
+        
+        # print("body_keyframe_w:\n", body_keyframe_w)
+        # print("leg_keyframe_w:\n", leg_keyframe_w)
+        return body_keyframe_w, leg_keyframe_w        
+
+    def pam_wave_keyframe(self, body_w_init, body_w_final, leg_w_init, leg_w_final, raise_height=0.1, support_legs = [True] * 6, leg_sequence = [0, 1, 2, 3, 4, 5]):
+        num_support_legs = sum(support_legs)
+        body_trans_interval = (body_w_final - body_w_init) / num_support_legs / 2
+        # only move body when support legs are moving
+        # when raising unsupported legs, body stays at the same position
+
+        # make sure to raise unsupported legs last
+        start_raising_not_support_legs = False
+        for leg_idx in leg_sequence:
+            if not support_legs[leg_idx]:
+                start_raising_not_support_legs = True
+            if start_raising_not_support_legs and support_legs[leg_idx]:
+                raise ValueError("Legs not providing support should be raised last")
+
+        body_keyframe_w = [body_w_init]
+        leg_keyframe_w = [leg_w_init]
+        mid = (leg_w_init + leg_w_final) / 2
+        curr = leg_w_init.copy() # current
+
+        def _append_body_keyframe(leg_idx):
+            if support_legs[leg_idx]:
+                body_keyframe_w.append(body_keyframe_w[-1] + body_trans_interval)
+            else:
+                body_keyframe_w.append(body_keyframe_w[-1])
+
+        for leg_idx in leg_sequence:
+            # raise leg
+            curr[:, leg_idx] = mid[:, leg_idx]
+            curr[2, leg_idx] = max(curr[2, leg_idx], leg_w_final[2, leg_idx]) + raise_height
+            leg_keyframe_w.append(curr.copy())
+            _append_body_keyframe(leg_idx)
+            # lower leg
+            curr[:, leg_idx] = leg_w_final[:, leg_idx]
+            leg_keyframe_w.append(curr.copy())
+            _append_body_keyframe(leg_idx)
+
+        # print("body_keyframe_w:\n", body_keyframe_w)
+        # print("leg_keyframe_w:\n", leg_keyframe_w)
+        return body_keyframe_w, leg_keyframe_w   
 
     def visualize_trajectory(trajectory):
         fig = plt.figure()
