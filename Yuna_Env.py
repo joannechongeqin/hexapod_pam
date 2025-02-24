@@ -83,6 +83,24 @@ class Map:
         plt.title("Height Map")
         plt.grid(True)
         plt.show()
+    
+    def save_map(self, file_path: str):
+        data = {
+            "map_range": self.map_range,
+            "map_resolution": self.map_resolution,
+            "height_map": self.height_map
+        }
+        np.savez(file_path, **data)
+        print(f"Map data saved to {file_path}.npz")
+
+    def load_map(self, file_path: str):
+        data = np.load(file_path + ".npz")
+        
+        self.map_range = float(data["map_range"])
+        self.map_resolution = float(data["map_resolution"])
+        self.height_map = data["height_map"]
+
+        print(f"Map data loaded from {file_path}.npz")
 
 class YunaEnv:
     def __init__(self, real_robot_control=True, pybullet_on=True, visualiser=True, camerafollow=False, 
@@ -169,42 +187,6 @@ class YunaEnv:
                 time.sleep(max(0, self.dt - t_step))
             else:
                 time.sleep(sleep)
-        
-    # def plot_reaction_forces_and_torque(self, joint_idx):
-    #     reaction_forces = np.array(self.all_reaction_forces)
-    #     torques = np.array(self.all_joint_torques)
-    #     # print("reaction_forces.shape:", reaction_forces.shape)
-    #     # print("torques.shape:", torques.shape)
-        
-    #     actuator_name = p.getJointInfo(self.YunaID, self.actuator[joint_idx])[1]
-    #     skip = 66 # skip the first 65 points (which is generated in init_robot)
-    #     fig, (ax1, ax2) = plt.subplots(2, 1)
-
-    #     # --- First subplot: Reaction Forces and Moments ---
-    #     ax1.plot(reaction_forces[skip:, joint_idx, 0], label='Fx')
-    #     ax1.plot(reaction_forces[skip:, joint_idx, 1], label='Fy')
-    #     ax1.plot(reaction_forces[skip:, joint_idx, 2], label='Fz')
-    #     ax1.plot(reaction_forces[skip:, joint_idx, 3], label='Mx')
-    #     ax1.plot(reaction_forces[skip:, joint_idx, 4], label='My')
-    #     ax1.plot(reaction_forces[skip:, joint_idx, 5], label='Mz')
-    #     ax1.set_title(f"Reaction Forces and Moments of Joint {actuator_name}")
-    #     ax1.set_xlabel("Trajectory Points")
-    #     ax1.set_ylabel("Force (N) / Moment (Nm)")
-    #     ax1.legend()
-    #     ax1.grid(True)
-        
-    #     # --- Second subplot: Joint Torque ---
-    #     ax2.plot(torques[skip:, joint_idx], label='Torque', color='orange')
-    #     ax2.set_title(f"Torque of Joint {actuator_name}")
-    #     ax2.set_xlabel("Trajectory Points")
-    #     ax2.set_ylabel("Torque (Nm)")
-    #     ax2.legend()
-    #     ax2.grid(True)
-    #     plt.tight_layout()
-    #     # plt.show() # block=False will froze the program 
-    #     folder = os.path.join(os.getcwd(), 'forces_torques')
-    #     filename = os.path.join(folder, f"joint_{actuator_name}.png")
-    #     plt.savefig(filename)
 
     def close(self):
         '''
@@ -309,8 +291,6 @@ class YunaEnv:
             # p.addUserDebugPoints(pointPositions=[[0.3, -0.2, 0.15]], pointColorsRGB=[[0, 1, 0]], pointSize=20, lifeTime=0)
             # p.addUserDebugPoints(pointPositions=[[-0.3, -0.2, 0.15]], pointColorsRGB=[[0, 1, 0]], pointSize=20, lifeTime=0)
 
-
-
         self.height_map = Map(map_range=self.map_range, map_resolution=self.map_resolution, pybullet_on=self.pybullet_on) # generate a 2.5D height map for the environment
 
         # load Yuna robot
@@ -394,36 +374,36 @@ class YunaEnv:
     # def add_y_ref_line_at_height(self, height, lineColorRGB=[1,0,1]):
     #     p.addUserDebugLine(lineFromXYZ=[0,-100,height], lineToXYZ=[0,100,height], lineColorRGB=lineColorRGB, lineWidth=1)
     
-    def add_ref_points_wrt_body_frame(self, points_b, pointSize=5, lifeTime=10):
-        '''
-        :param points_b: points wrt body frame, 3x6 (workspace) or 18x1 (jointspace)
-        '''
-        if shape(points_b) == (18,):
-            points_b = solveFK(points_b)
-        elif shape(points_b) != (3, 6):
-            raise ValueError('points_b should be either 3x6 or 1x18')
+    # def add_ref_points_wrt_body_frame(self, points_b, pointSize=5, lifeTime=10):
+    #     '''
+    #     :param points_b: points wrt body frame, 3x6 (workspace) or 18x1 (jointspace)
+    #     '''
+    #     if shape(points_b) == (18,):
+    #         points_b = solveFK(points_b)
+    #     elif shape(points_b) != (3, 6):
+    #         raise ValueError('points_b should be either 3x6 or 1x18')
         
-        WTB = self.get_body_matrix()
-        points_w = np.dot(WTB, np.vstack((points_b, np.ones((1, 6)))))[0:3, :]
-        ref_points = [list(points_w[:, i]) for i in range(points_w.shape[1])]
-        pointColorsRGB = [
-            [1, 0, 0],   # Red
-            [0, 1, 0],   # Green
-            [0, 0, 1],  # Blue
-            [1, 1, 0],   # Yellow
-            [0, 1, 1],   # Cyan
-            [1, 0, 1]   # Magenta
-        ]
-        p.addUserDebugPoints(pointPositions=ref_points, pointColorsRGB=pointColorsRGB, pointSize=pointSize, lifeTime=lifeTime)
+    #     WTB = self.get_body_matrix()
+    #     points_w = np.dot(WTB, np.vstack((points_b, np.ones((1, 6)))))[0:3, :]
+    #     ref_points = [list(points_w[:, i]) for i in range(points_w.shape[1])]
+    #     pointColorsRGB = [
+    #         [1, 0, 0],   # Red
+    #         [0, 1, 0],   # Green
+    #         [0, 0, 1],  # Blue
+    #         [1, 1, 0],   # Yellow
+    #         [0, 1, 1],   # Cyan
+    #         [1, 0, 1]   # Magenta
+    #     ]
+    #     p.addUserDebugPoints(pointPositions=ref_points, pointColorsRGB=pointColorsRGB, pointSize=pointSize, lifeTime=lifeTime)
     
-    def add_body_ref_points_wrt_body_frame(self, points_b, pointSize=5, lifeTime=10):
-        WTB = self.get_body_matrix()
-        # print(points_b)
-        points_w = np.dot(WTB, np.vstack((points_b, np.ones((1, 6)))))[0:3, :]
-        p.addUserDebugPoints(pointPositions=points_w, pointColorsRGB=[[1, 0, 0]] * len(points_w), pointSize=pointSize, lifeTime=lifeTime)
+    # def add_body_ref_points_wrt_body_frame(self, points_b, pointSize=5, lifeTime=10):
+    #     WTB = self.get_body_matrix()
+    #     # print(points_b)
+    #     points_w = np.dot(WTB, np.vstack((points_b, np.ones((1, 6)))))[0:3, :]
+    #     p.addUserDebugPoints(pointPositions=points_w, pointColorsRGB=[[1, 0, 0]] * len(points_w), pointSize=pointSize, lifeTime=lifeTime)
     
-    def add_body_frame_ref_point(self): # calculated body_frame, might have error when compared to actual one in pybullet
-        p.addUserDebugPoints(pointPositions=[np.array(self.body_pos_w)], pointColorsRGB=[[0.5, 0.5, 0.5]], pointSize=10, lifeTime=0)
+    # def add_body_frame_ref_point(self): # calculated body_frame, might have error when compared to actual one in pybullet
+    #     p.addUserDebugPoints(pointPositions=[np.array(self.body_pos_w)], pointColorsRGB=[[0.5, 0.5, 0.5]], pointSize=10, lifeTime=0)
                 
     def get_robot_config(self):
         '''
@@ -481,6 +461,15 @@ if __name__=='__main__':
     
     height_map = yunaenv.height_map
     height_map.plot()
+
+    # height_map.save_map("height_map")
+
+    # new_map_instance = Map()
+    # new_map_instance.load_map("height_map")
+    # for i in range(10):
+    #     x, y = np.random.uniform(-2.5, 2.5), np.random.uniform(-2.5, 2.5)
+    #     print(f"Height at ({x}, {y}): {new_map_instance.get_height_at(x, y)}")
+    # new_map_instance.plot()
 
     print("init_base_pos: ", yunaenv.body_pos_w) # (0, 0, 0.1426)
     print("init_base_matrix: ", yunaenv.get_body_matrix())

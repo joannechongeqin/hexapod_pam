@@ -213,10 +213,9 @@ def ssm_cost_function(body_xys):
     for i in range(body_xys.shape[0]):
         body_point = body_xys[i]
         if not point_in_hull(body_point, hull_points2[i]):
-            cost -= 1e6  # Apply penalty for points outside the polygon
+            cost = 1e6  # Apply large penalty for points outside the polygon
 
     return - cost # negative because using minimize (and we want to maximize ssm)
-
 
 if __name__=='__main__':
 
