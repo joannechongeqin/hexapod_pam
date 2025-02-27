@@ -10,6 +10,7 @@ import numpy as np
 from static_stability_margin import convex_hull_pam, static_stability_margin, point_in_hull
 import logging
 from Yuna_Env import Map
+import time
 
 np.set_printoptions(precision=4, suppress=True)
 torch.set_printoptions(precision=4, sci_mode=False)
@@ -127,7 +128,8 @@ class PamOptimizer:
 
         :param torch.Tensor params: A tensor containing joint angles and base position.
                                     Shape: [batch_size, 21], where the first 18 values are joint angles, 
-                                    and the remaining 3 are base parameters (x,y,z) in world frame. 
+                                    and the next 3 are base parameters (x,y,z) in world frame,
+                                    and the last value is the y rotation (pitch) of the base.
 
         :return: robot_frame_trans_w, base_trans_w, leg_trans_w, leg_trans_r
         - robot_frame_trans_w (torch.Tensor): Transformation matrix of robot frame in world frame. Shape: [batch_size, 4, 4].
@@ -135,8 +137,8 @@ class PamOptimizer:
         - leg_trans_w (torch.Tensor): Leg transformation matrices in world frame. Shape: [batch_size, NUM_Legs, num_of_links_per_leg, 4, 4].
         - leg_trans_r (torch.Tensor): Leg transformation matrices in robot frame. Shape: [batch_size, NUM_Legs, num_of_links_per_leg, 4, 4].
         """
-        rob_tf_w = pk.Transform3d(pos=torch.cat([params[:,18:]],dim=-1), 
-                                rot=torch.cat([torch.zeros(self.batch_size,3)],dim=-1))
+        rob_tf_w = pk.Transform3d(pos=torch.cat([params[:,18:21]],dim=-1), 
+                                      rot=torch.cat([torch.zeros(self.batch_size, 1), params[:,21].unsqueeze(1), torch.zeros(self.batch_size, 1)],dim=-1))
         robot_frame_trans_w = rob_tf_w.get_matrix() # in world frame
         base_trans_r, leg_trans_r = self.get_transformation_fk(params[:,:18]) # in robot frame
 
@@ -147,33 +149,7 @@ class PamOptimizer:
         return robot_frame_trans_w, base_trans_w, leg_trans_w, leg_trans_r
 
 
-    # def check_pose_validity(self. leg_pos, body_pos, legs_on_ground):
-    #     """
-    #     :param torch.Tensor leg_pos: Positions of the end-effectors of all legs. Shape: [NUM_LEGS, 3].
-    #     :param torch.Tensor body_pos: Position of the body CoM. Shape: [3].
-    #     """
-    #     # print("check_pose_validity leg_pos: ", leg_pos)
-    #     # print("check_pose_validity body_pos: ", body_pos)
-    #     # --- if supported by less than 3 legs, robot is confirm not stable ---
-    #     if sum(legs_on_ground) < 3:
-    #         print("Invalid pose: Less than 3 legs on ground, robot is not stable")
-    #         return False
-
-    #     # --- check if distance between opposite legs is achievable ---
-    #     def get_distance(p1, p2):
-    #         return torch.norm(p1 - p2).item()
-        
-    #     opp_pairs = [(0, 5), (1, 4), (2, 3)]
-    #     for i, j in opp_pairs:
-    #         # print(f"Distance between legs {i} and {j}: {get_distance(goal[i], goal[j])}")
-    #         if get_distance(leg_pos[i], leg_pos[j]) > MAX_OPP_LEGS_DIST:
-    #             print(f"Invalid pose: Distance between legs {i} and {j} (opposite pair) is too far")
-    #             return False
-            
-    #     return True
-
-
-    def solve_multiple_legs_ik(self, pos, rot, leg_idxs, has_base_goal = False, target_base_xy = np.zeros(3)):
+    def solve_multiple_legs_ik(self, pos, rot, leg_idxs, has_base_goal = False, target_base_xy = np.zeros(3), plot_filename="pam_costs.png"):
         """
         Solves the inverse kinematics for multiple legs, optimizing to reach specified goal positions.
 
@@ -196,8 +172,8 @@ class PamOptimizer:
         # generate random initial guess for optimization
         theta = self.th_0 # torch.rand(batch_size, 18) # joint angles
         base_xyz_w = torch.rand(self.batch_size, 3) # xyz base position
-        y_rot = torch.zeros(self.batch_size, 1) # y rotation (pitch) of base
-        params = torch.cat([theta, base_xyz_w], dim=-1)
+        y_rot = torch.rand(self.batch_size, 1) # y rotation (pitch) of base
+        params = torch.cat([theta, base_xyz_w, y_rot], dim=-1)
         # TODO: MAKE BODY ROTATION (roll pitch yaw) AS PARAMS ALSO?
 
         # Initialize lists to track cost terms
@@ -213,50 +189,50 @@ class PamOptimizer:
             #       rob_tf = Transform3d(pos=tensor([[x, y, z]]), rot=tensor([[quaternion (w,x,y,z) of euler angle (0, 0, z_rot)]])) 
             #       torch.cat(..., dim=-1) concatenates input tensors along last dim
             #       .unsqueeze(dim) adds a new dim of size 1 at the specified position (for proper concatenation)
-            rob_tf_w = pk.Transform3d(pos=torch.cat([params[:,18:]],dim=-1), 
-                                        rot=torch.cat([torch.zeros(self.batch_size,3)],dim=-1))
+            rob_tf_w = pk.Transform3d(pos=torch.cat([params[:,18:21]],dim=-1), 
+                                      rot=torch.cat([torch.zeros(self.batch_size, 1), params[:,21].unsqueeze(1), torch.zeros(self.batch_size, 1)],dim=-1))
+            # self.logger.debug(f"rob_tf_w: {rob_tf_w.get_matrix()}")
             base_trans_r, leg_trans_r = self.get_transformation_fk(params[:,:18]) # [batch_size, NUM_Legs, num_of_links_per_leg, 4, 4]
             eef_trans_r = leg_trans_r[:,:,-1,:,:] # [batch_size, NUM_Legs, 4, 4] (select last elem along 3rd dim)
-
             all_eef_pos_w = torch.einsum("bkl,bilm->bikm",rob_tf_w.get_matrix(),eef_trans_r)
             target_eef_pos_w = all_eef_pos_w[:,leg_idxs,:3,3] # extract pos (xyz) of end-effectors
             
             # --- optimize based on static stability margin (min dist from the CoM to the edges of support polygon) ---
+            self.logger.debug("\n--- optimizing based on static stability margin ---")
             # project all points to a ground plane and draw support polygon using legs on ground
             # then minimize distance of body CoM to the centroid of the support polygon
             # eef_support_idxs = [i for i in range(self.NUM_LEGS) if legs_on_ground[i]]
             eef_support_idxs = [i for i in range(self.NUM_LEGS) if i not in leg_idxs]
             eef_support_xy_pos = all_eef_pos_w[:, eef_support_idxs, :2, 3]
             body_xys = params[:,18:20] # size = (batch_size, 2)
-            # print("eef_support_idxs: ", eef_support_idxs)
-            # print("eef_support_xy_pos: ", eef_support_xy_pos)
-            # print("body_xys: ", body_xys)
+            self.logger.debug(f"eef_support_idxs: {eef_support_idxs}")
+            self.logger.debug(f"eef_support_xy_pos: {eef_support_xy_pos}")
+            self.logger.debug(f"body_xys: {body_xys}")
             hull_points = convex_hull_pam(eef_support_xy_pos)
-            ssm_cost = static_stability_margin(eef_support_xy_pos, body_xys).mean() # mean of all min distances from CoM to edges of support polygon
-            self.logger.debug("\n--- optimizing based on static stability margin ---")
-            self.logger.debug(f"ssm:\n{ssm_cost}")
+            ssm_cost = 0.1 * static_stability_margin(eef_support_xy_pos, body_xys).mean() # mean of all min distances from CoM to edges of support polygon
+            self.logger.debug(f"ssm: {ssm_cost}")
             for i in range(body_xys.shape[0]): # Check if each body_xys point is inside the support polygon
                 body_point = body_xys[i]
                 if not point_in_hull(body_point, hull_points[i]):
-                    ssm_cost = 1e6  # Apply penalty for points outside the polygon
+                    ssm_cost -= 1e2  # Apply penalty for points outside the polygon
                     self.logger.warning("body xy not within support polygon")
             self.ssm_history.append(ssm_cost.detach().numpy())
 
             # --- optimize based on free legs' height ---
             # free legs = legs not specified for target goal pos (xyz), but heights are fixed to a specific plane
             # free_legs = [i for i in range(self.NUM_LEGS) if i not in leg_idxs]
-            free_legs_height = all_eef_pos_w[:, eef_support_idxs, 2, 3]
-            free_legs_xy_pos = all_eef_pos_w[:, :, :2, 3]
+            free_legs_height = all_eef_pos_w[:, eef_support_idxs, 2, 3] # free legs is support legs
+            # free_legs_xy_pos = all_eef_pos_w[:, :, :2, 3]
             # TODO: detect if it is near any edges / steps (aka sudden height changes)
-            heights_at_xy_pos_on_map = self.height_map.get_heights_at(free_legs_xy_pos.detach().numpy().reshape(-1, 2))
-            free_legs_plane = torch.tensor(heights_at_xy_pos_on_map.reshape(self.batch_size, -1))[:, eef_support_idxs]
+            heights_at_xy_pos_on_map = self.height_map.get_heights_at(eef_support_xy_pos.detach().numpy().reshape(-1, 2))
+            free_legs_plane = torch.tensor(heights_at_xy_pos_on_map.reshape(self.batch_size, -1))
             free_legs_height_residual_squared = (free_legs_height - free_legs_plane) ** 2
             # print("free_legs_xy_pos:", free_legs_xy_pos)
             # print("heights_at_xy_pos_on_map: ", heights_at_xy_pos_on_map)
             # print("free_legs_plane: ", free_legs_plane)
             # print(f"free_legs_height_residual_squared:\n{free_legs_height_residual_squared}")
             self.logger.debug("\n--- optimizing based on free legs' height ---")
-            self.logger.debug(f"free_legs_xy_pos:\n{free_legs_xy_pos}")
+            self.logger.debug(f"free_legs_xy_pos:\n{eef_support_xy_pos}")
             self.logger.debug(f"free_legs_height:\n{free_legs_height}")
             self.logger.debug(f"free_legs_plane:\n{free_legs_plane}")
             self.logger.debug(f"free_legs_height_residual_squared:\n{free_legs_height_residual_squared}")
@@ -346,66 +322,70 @@ class PamOptimizer:
             self.logger.warning("Optimization did not converge")
         self.logger.debug(f"result:\n{res.x}")
 
-        self.plot_objective_history()
+        self.plot_objective_history(plot_filename)
         
         return res.x
 
-    def plot_objective_history(self, filename="pam_costs.png"):
-        fig, axs = plt.subplots(4, 2, figsize=(15, 10))
+    def plot_objective_history(self, plot_filename="pam_costs.png"):
+        start_plot_time = 5
+        fig, axs = plt.subplots(4, 2, figsize=(15, 20))
+        x_label = 'Time Step'
+        y_label = 'Cost Value'
         
-        axs[0, 0].plot(self.cost_history, label='Total Cost', linewidth=2)
+        axs[0, 0].plot(self.cost_history[start_plot_time:], label='Total Cost', linewidth=2)
         axs[0, 0].set_title('Total Cost')
-        axs[0, 0].set_xlabel('Evaluation Step')
-        axs[0, 0].set_ylabel('Cost Value')
+        axs[0, 0].set_xlabel(x_label)
+        axs[0, 0].set_ylabel(y_label)
         axs[0, 0].legend()
         axs[0, 0].grid(True)
         
-        axs[0, 1].plot(self.free_legs_history, label='Free Legs Height', linestyle='--')
+        axs[0, 1].plot(self.free_legs_history[start_plot_time:], label='Free Legs Height', linestyle='--')
         axs[0, 1].set_title('Free Legs Height')
-        axs[0, 1].set_xlabel('Evaluation Step')
-        axs[0, 1].set_ylabel('Cost Value')
+        axs[0, 1].set_xlabel(x_label)
+        axs[0, 1].set_ylabel(y_label)
         axs[0, 1].legend()
         axs[0, 1].grid(True)
         
-        axs[1, 0].plot(self.ssm_history, label='Static Stability Margin', linestyle='--')
+        axs[1, 0].plot(self.ssm_history[start_plot_time:], label='Static Stability Margin', linestyle='--')
         axs[1, 0].set_title('Static Stability Margin')
-        axs[1, 0].set_xlabel('Evaluation Step')
-        axs[1, 0].set_ylabel('Cost Value')
+        axs[1, 0].set_xlabel(x_label)
+        axs[1, 0].set_ylabel(y_label)
         axs[1, 0].legend()
         axs[1, 0].grid(True)
 
-        axs[1, 1].plot(self.last_link_history, label='Last Link Perpendicularity', linestyle='--')
+        axs[1, 1].plot(self.last_link_history[start_plot_time:], label='Last Link Perpendicularity', linestyle='--')
         axs[1, 1].set_title('Last Link Perpendicularity')
-        axs[1, 1].set_xlabel('Evaluation Step')
-        axs[1, 1].set_ylabel('Cost Value')
+        axs[1, 1].set_xlabel(x_label)
+        axs[1, 1].set_ylabel(y_label)
         axs[1, 1].legend()
         axs[1, 1].grid(True)
         
-        axs[2, 0].plot(self.body_height_history, label='Body Height Clearance', linestyle='--')
+        axs[2, 0].plot(self.body_height_history[start_plot_time:], label='Body Height Clearance', linestyle='--')
         axs[2, 0].set_title('Body Height Clearance')
-        axs[2, 0].set_xlabel('Evaluation Step')
-        axs[2, 0].set_ylabel('Cost Value')
+        axs[2, 0].set_xlabel(x_label)
+        axs[2, 0].set_ylabel(y_label)
         axs[2, 0].legend()
         axs[2, 0].grid(True)
         
         if len(self.target_leg_history) > 0:
-            axs[2, 1].plot(self.target_leg_history, label='Target Legs Position', linestyle='--')
+            axs[2, 1].plot(self.target_leg_history[start_plot_time:], label='Target Legs Position', linestyle='--')
             axs[2, 1].set_title('Target Legs Position')
-            axs[2, 1].set_xlabel('Evaluation Step')
-            axs[2, 1].set_ylabel('Cost Value')
+            axs[2, 1].set_xlabel(x_label)
+            axs[2, 1].set_ylabel(y_label)
             axs[2, 1].legend()
             axs[2, 1].grid(True)
         
         if len(self.base_xy_history) > 0:
-            axs[3, 0].plot(self.base_xy_history, label='Base XY', linestyle='--')
+            axs[3, 0].plot(self.base_xy_history[start_plot_time:], label='Base XY', linestyle='--')
             axs[3, 0].set_title('Base XY')
-            axs[3, 0].set_xlabel('Evaluation Step')
-            axs[3, 0].set_ylabel('Cost Value')
+            axs[3, 0].set_xlabel(x_label)
+            axs[3, 0].set_ylabel(y_label)
             axs[3, 0].legend()
             axs[3, 0].grid(True)
         
         plt.tight_layout()
-        plt.savefig(os.path.join(self.curr_dir, filename))
+        plt.savefig(os.path.join(self.curr_dir, plot_filename))
+        plt.close()
         # plt.show()
 
 
@@ -579,12 +559,18 @@ if __name__=='__main__':
     # params = optimizer.solve_multiple_legs_ik(pos, rot, legs_on_ground=legs_on_ground, leg_idxs=leg_idxs, has_base_goal=True, target_base_xy=torch.tensor([0.1, 0.]))
     
     leg_idxs = [1]
-    pos = torch.tensor([[1.4, -0.3, 0.5]])
+    pos = torch.tensor([[1.4, -0.3, 0.7]])
+
+    # leg_idxs = [0, 1]
+    # pos = torch.tensor([[1.4, 0.3, 0.7], [1.4, -0.3, 0.6]])
+
     rot = torch.zeros_like(pos)
 
+    start_time = time.time()
     params = optimizer.solve_multiple_legs_ik(pos, rot, leg_idxs=leg_idxs)
     robot_frame_trans_w, base_trans_w, leg_trans_w, leg_trans_r = optimizer.get_transformations_from_params(params)
-    
+    print("Time taken: ", time.time() - start_time)
+        
     # --- print solutions + visualization ---
     for i in range(optimizer.batch_size):
         print(f"Solution {i + 1}:")

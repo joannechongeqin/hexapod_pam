@@ -4,19 +4,20 @@ import torch
 import numpy as np
 
 leg_idxs = [1]
-pos = torch.tensor([[1.4, -0.3, 0.62]])
+pos = torch.tensor([[1.45, -0.3, 0.7]])
 
 # leg_idxs = [0, 1]
-# pos = torch.tensor([[1.4, 0.3, 0.7], [1.4, -0.3, 0.6]])
+# pos = torch.tensor([[1.4, 0.2, 0.7], [1.4, -0.2, 0.6]])
 
 yuna = Yuna(real_robot_control=0, pybullet_on=1, load_fyp_map=True) # , goal=pos.tolist())
 yuna.env.camerafollow = False
 
 # yuna.height_map.plot()
 
-yuna.pam(pos, leg_idxs)
+# yuna.pam(pos, leg_idxs)
+yuna.pam_press_button(pos, 1)
 
-# --- TEST SET 1 ---
+# --- RAISE ONE: TEST SET 1 ---
 # body_waypoints = np.array([
 #     [0.1419, 0.019, 0.1654],
 #     [0.2829, 0.0294, 0.2745],
@@ -49,4 +50,5 @@ yuna.pam(pos, leg_idxs)
 
 # yuna.pam_move(body_waypoints, legs_waypoints)
 
-time.sleep(1000)
+
+time.sleep(100)

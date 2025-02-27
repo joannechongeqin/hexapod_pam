@@ -246,6 +246,89 @@ class TrajPlanner:
         # print("leg_keyframe_w:\n", leg_keyframe_w)
         return body_keyframe_w, leg_keyframe_w        
 
+    def pam_press_button_keyframe(self, body_w_init, body_w_final, leg_w_init, leg_w_final, press_leg_idx, raise_height=0.1):
+        # assuming can only press with front two legs (index 0 or 1)
+        # quadrangular gait:
+        #   1. move leg2 and leg5 (and trans half of body)
+        #   2. move leg3 and leg4 (and trans half of body)
+        #   3. move last support leg
+        #   4. final leg to press
+        pair1 = [3, 4]
+        pair2 = [2, 5]
+        last_support_leg = 0 if press_leg_idx == 1 else 1
+
+        # for step 1 and 2: split into 4 keyframes where body moves 1/4 forward each time
+        quarter_body_trans = (body_w_final - body_w_init) / 4
+        body_keyframe_w = [body_w_init]
+        for i in range(4): 
+            body_keyframe_w.append(body_keyframe_w[-1] + quarter_body_trans)
+
+        leg_keyframe_w = [leg_w_init]
+        
+        mid = (leg_w_init + leg_w_final) / 2
+        # 1. raise first pair
+        set1 = leg_w_init.copy()
+        for i in pair1: # raise pair 1 legs
+            set1[:, i] = mid[:, i] 
+            set1[2, i] = max(set1[2, i], leg_w_final[2, i]) + raise_height
+        leg_keyframe_w.append(set1)
+        
+        # 2. lower first tripod set
+        set2 =  set1.copy()
+        for i in pair1: # lower pair 1 legs
+            set2[:, i] = leg_w_final[:, i]
+        leg_keyframe_w.append(set2)
+
+        # 3. raise second tripod set
+        set3 = set2.copy()
+        for i in pair2: # raise pair 2 legs
+            set3[:, i] = mid[:, i]
+            set3[2, i] = max(set2[2, i], leg_w_final[2, i]) + raise_height
+        leg_keyframe_w.append(set3)
+
+        # 4. lower second pair set
+        set4 = set3.copy()
+        for i in pair2: # lower pair 1 legs
+            set4[:, i] = leg_w_final[:, i]
+        leg_keyframe_w.append(set4)
+        
+
+        # 5. raise last support leg
+        set5 = set4.copy()
+        set5[:, last_support_leg] = mid[:, last_support_leg]
+        set5[2, last_support_leg] = max(set4[2, last_support_leg], leg_w_final[2, last_support_leg]) + raise_height
+        leg_keyframe_w.append(set5)
+        body_keyframe_w.append(body_keyframe_w[-1])
+
+        # 6. lower last support leg
+        set6 = set5.copy()
+        set6[:, last_support_leg] = leg_w_final[:, last_support_leg]
+        leg_keyframe_w.append(set6)
+        body_keyframe_w.append(body_keyframe_w[-1]) 
+
+        # 7. slowly raise last leg to press
+        set7a = set6.copy()
+        set7a[2, press_leg_idx] = set6[2, press_leg_idx] + raise_height
+        leg_keyframe_w.append(set7a)
+        body_keyframe_w.append(body_keyframe_w[-1])
+
+        set7b = set7a.copy()
+        set7b[:, press_leg_idx] = (set7b[:, press_leg_idx] + leg_w_final[:, press_leg_idx]) / 2
+        leg_keyframe_w.append(set7b)
+        body_keyframe_w.append(body_keyframe_w[-1])
+
+        # 8. press with last leg
+        set8 = set7b.copy()
+        set8[:, press_leg_idx] = leg_w_final[:, press_leg_idx]
+        leg_keyframe_w.append(set8)
+        body_keyframe_w.append(body_keyframe_w[-1])
+
+        print("press_button body_keyframe_w:\n", body_keyframe_w)
+        print("press_button leg_keyframe_w:\n", leg_keyframe_w)
+        return body_keyframe_w, leg_keyframe_w 
+    
+
+
     def pam_wave_keyframe(self, body_w_init, body_w_final, leg_w_init, leg_w_final, raise_height=0.1, support_legs = [True] * 6, leg_sequence = [0, 1, 2, 3, 4, 5]):
         num_support_legs = sum(support_legs)
         body_trans_interval = (body_w_final - body_w_init) / num_support_legs / 2

@@ -302,8 +302,11 @@ class Yuna:
 
         self.optimizer.logger.info("----- STARTING PAM -----")
         rot = torch.zeros_like(pos)
-        final_params = self.optimizer.solve_multiple_legs_ik(pos, rot, leg_idxs, False)
+        final_pose_start_time = time.time()
+        final_params = self.optimizer.solve_multiple_legs_ik(pos=pos, rot=rot, leg_idxs=leg_idxs, has_base_goal=False, plot_filename="waypoint_final.png")
         _, final_base_trans_w, final_leg_trans_w, _ = self.optimizer.get_transformations_from_params(final_params)
+        final_pose_end_time = time.time()
+        self.optimizer.logger.info(f"Time taken to find final pose: {final_pose_end_time - final_pose_start_time} seconds")
         self.optimizer.logger.info("----- final pose found -----")
 
         if batch_idx >= self.batch_size:
@@ -350,8 +353,11 @@ class Yuna:
             temp_rot = torch.zeros_like(temp_pos)
             
             self.optimizer.logger.info(f"\n--- Solving for waypoint {i} ---")
-            next_params = self.optimizer.solve_multiple_legs_ik(pos=temp_pos, rot=temp_rot, leg_idxs=leg_idxs, has_base_goal=True, target_base_xy=torch.tensor(body_waypoint[:2]))
+            start_time = time.time()
+            next_params = self.optimizer.solve_multiple_legs_ik(pos=temp_pos, rot=temp_rot, leg_idxs=leg_idxs, has_base_goal=True, target_base_xy=torch.tensor(body_waypoint[:2]), plot_filename=f"waypoint_{i}.png")
             _, next_base_trans_w, next_leg_trans_w, _ = self.optimizer.get_transformations_from_params(next_params)
+            end_time = time.time()
+            self.optimizer.logger.info(f"Time taken to find waypoint {i}: {end_time - start_time} seconds")
             next_body_pos_w = next_base_trans_w[batch_idx, :3, 3].numpy()
             next_eef_pos_w = next_leg_trans_w[batch_idx, :, -1, :3, 3].numpy().T
             self.optimizer.logger.info(f"waypoint {i} body pos in world frame: {next_body_pos_w}")
@@ -367,16 +373,43 @@ class Yuna:
         self.optimizer.logger.info(f"legs waypoints: {legs_waypoints}")
         
         self._plot_hexapod_path(body_waypoints, legs_waypoints)
+        return body_waypoints, legs_waypoints
+        # self.pam_move(body_waypoints, legs_waypoints)
 
-        self.pam_move(body_waypoints, legs_waypoints)
-    
-    def pam_move(self, body_waypoints, legs_waypoints):
+    def pam_move(self, body_waypoints, legs_waypoints, motion=("press_button", 1)):
+        # motion: ("normal_walk", None) or ("press_button", leg_idx)
         num_of_waypoints = len(body_waypoints)
+        # normal walking
         for i in range(num_of_waypoints-1):
             self.move_to_next_pose_tripod_gait(body_waypoints[i], legs_waypoints[i])
 
-        # TODO: now hardcode last leg sequence, assuming it's known that leg idx 1 is raised last
-        self.move_to_next_pose_wave_gait(body_waypoints[-1], legs_waypoints[-1], leg_sequence = [2, 3, 4, 5, 0, 1])
+        if motion[0] == "normal_walk":
+            self.move_to_next_pose_tripod_gait(body_waypoints[-1], legs_waypoints[-1])
+
+        if motion[0] == "press_button":
+            self._pam_press_button_motion(body_waypoints[-1], legs_waypoints[-1], motion[1])
+
+    def pam_press_button(self, button_pos, leg_idx):
+        body_waypoints, legs_waypoints = self.pam(button_pos, [leg_idx])
+        self.pam_move(body_waypoints, legs_waypoints, ("press_button", leg_idx))
+
+    def _pam_press_button_motion(self, target_body_pos_w, target_eef_pos_w, press_leg_idx=1):
+        # assuming can only press with front two legs (index 0 or 1)      
+        initial_body_pos_w = self.bodyPos_w().copy() # initial body pos in world frame
+        # print("initial body pos: ", initial_body_pos_w)
+        # print("target body pos: ", target_body_pos_w)
+        # print("initial eef pos: ", self.eePos_w())
+        # print("target eef pos: ", target_eef_pos_w)        
+        for leg_idx in range(NUM_LEGS):
+            if leg_idx != press_leg_idx:
+                # pre processing, force adjust eef pos to be at least at the height of the next position 
+                # so that it doesn't push too much on the ground / too high and not touching the gorund
+                height_at_next_pos = self.height_map.get_height_at(target_eef_pos_w[0, leg_idx], target_eef_pos_w[1, leg_idx])
+                target_eef_pos_w[2, leg_idx] = height_at_next_pos
+        
+        body_keyframe_w, leg_keyframe_w = self.trajplanner.pam_press_button_keyframe(initial_body_pos_w, target_body_pos_w, self.eePos_w(), target_eef_pos_w, press_leg_idx)
+        leg_keyframe_b = self.keyframe_b_from_w(body_keyframe_w, leg_keyframe_w)
+        self.move_legs_to_pos_in_body_frame(leg_keyframe_b)
 
     def move_to_next_pose_tripod_gait(self, next_body_pos_w, next_eef_pos_w):
         # ASSUMING ALWAYS ALL SIX LEGS ON GROUND WHEN MOVING WITH TRIPOD GAIT
@@ -389,7 +422,7 @@ class Yuna:
             next_eef_pos_w[2, leg_idx] = height_at_next_pos
 
         body_keyframe_w, leg_keyframe_w = self.trajplanner.pam_tripod_keyframe(initial_body_pos_w, next_body_pos_w, self.eePos_w(), next_eef_pos_w)
-        leg_keyframe_b = self.keyframe_b_to_w(body_keyframe_w, leg_keyframe_w)
+        leg_keyframe_b = self.keyframe_b_from_w(body_keyframe_w, leg_keyframe_w)
         self.move_legs_to_pos_in_body_frame(leg_keyframe_b)
 
     def move_to_next_pose_wave_gait(self, next_body_pos_w, next_eef_pos_w, leg_sequence=[0, 1, 2, 3, 4, 5]):
@@ -407,7 +440,7 @@ class Yuna:
         leg_keyframe_b = self.keyframe_b_to_w(body_keyframe_w, leg_keyframe_w)
         self.move_legs_to_pos_in_body_frame(leg_keyframe_b)
 
-    def keyframe_b_to_w(self, body_keyframe_w, leg_keyframe_w):
+    def keyframe_b_from_w(self, body_keyframe_w, leg_keyframe_w):
         # TODO: if add rotation need include rotation matrix
         leg_keyframe_b = []
         keyframe_len = len(body_keyframe_w)
