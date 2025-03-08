@@ -207,15 +207,19 @@ def visualize_convex_hull(points, hull_points, interior_point, batch_idx=0):
 
 def ssm_cost_function(body_xys):
     ssm = static_stability_margin(eef_support_xy_pos, body_xys)
-    cost = ssm.mean()
+    batch_size = body_xys.shape[0]
+    penalty = torch.zeros_like(ssm)
     
     # Check if each body_xys point is inside the support polygon
-    for i in range(body_xys.shape[0]):
+    for i in range(batch_size):
         body_point = body_xys[i]
         if not point_in_hull(body_point, hull_points2[i]):
-            cost = 1e6  # Apply large penalty for points outside the polygon
+            penalty[i] = 1e6 # Apply large penalty for points outside the polygon
 
-    return - cost # negative because using minimize (and we want to maximize ssm)
+    total_ssm = ssm - penalty
+    cost = - total_ssm.mean()
+
+    return cost # negative because using minimize (and we want to maximize ssm)
 
 if __name__=='__main__':
 
