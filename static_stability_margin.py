@@ -4,6 +4,8 @@ import torch
 import matplotlib.pyplot as plt
 from torchmin import minimize
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 def convex_hull_pam(points):
     """
     Computes the convex hull of 2D points using gift wrapping / jarvis march algorithm.
@@ -32,12 +34,12 @@ def convex_hull_pam(points):
                 if i == current_idx:
                     continue
                 # Compute cross product to find counter-clockwise turn
-                a = batch_points[current_idx]
-                b = batch_points[next_idx]
-                c = batch_points[i]
+                a = batch_points[current_idx].to(device)
+                b = batch_points[next_idx].to(device)
+                c = batch_points[i].to(device)
                 cross_product = torch.cross(
-                    torch.cat([b - a, torch.tensor([0.0])]),
-                    torch.cat([c - a, torch.tensor([0.0])]),
+                    torch.cat([b - a, torch.tensor([0.0], device=device)]),
+                    torch.cat([c - a, torch.tensor([0.0], device=device)]),
                     dim=-1
                 )[-1]  # Z-component of cross product
                 if cross_product < 0:  # Counter-clockwise turn
@@ -123,7 +125,8 @@ def point_in_hull(point, hull):
         to_point_vector = point - start
 
         # Compute cross product to determine if the point is to the left of the edge (counter-clockwise)
-        cross_product = torch.cross(torch.cat([edge_vector, torch.tensor([0.0])]), torch.cat([to_point_vector, torch.tensor([0.0])]), dim=-1)[-1]
+        cross_product = torch.cross(torch.cat([edge_vector.to(device), torch.tensor([0.0], device=device)]), 
+                                    torch.cat([to_point_vector.to(device), torch.tensor([0.0], device=device)]), dim=-1)[-1]
         
         if cross_product < 0:  # If the point is to the right of the edge (clockwise), it's outside
             inside = False
@@ -234,12 +237,12 @@ if __name__=='__main__':
         [-0.0184, -0.3715],
         [-0.4543,  0.3337],
         [-0.4543, -0.2188]]
-    ])
+    ], device=device)
 
     body_xys = torch.tensor([
         [-0.0321,  0.0035],
         [-0.0608,  0.0574]
-    ])
+    ], device=device)
 
     hull_points2 = convex_hull_pam(eef_support_xy_pos)
     distances_before = point_to_edge_distances(body_xys, hull_points2)
@@ -248,6 +251,9 @@ if __name__=='__main__':
     stability_margin_values = static_stability_margin(eef_support_xy_pos, body_xys)
     print("Static Stability Margin before:")
     print(stability_margin_values)
+    eef_support_xy_pos = eef_support_xy_pos.cpu()
+    hull_points2 = hull_points2.cpu()
+    body_xys = body_xys.cpu()
     visualize_convex_hull(eef_support_xy_pos, hull_points2, body_xys, batch_idx=0)
     visualize_convex_hull(eef_support_xy_pos, hull_points2, body_xys, batch_idx=1)
 

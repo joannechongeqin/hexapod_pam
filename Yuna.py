@@ -198,7 +198,7 @@ class Yuna:
 
         # plan and execute trajectory
         # traj = self.trajplanner.general_traj(waypoints, total_time=len(waypoints) * 0.8)
-        traj = self.trajplanner.pam_traj(waypoints, total_time=len(waypoints) * 0.6)
+        traj = self.trajplanner.pam_traj(waypoints, total_time=len(waypoints) * 0.2)
 
         counter = 0
         for traj_point in traj:
@@ -313,8 +313,8 @@ class Yuna:
             print("Error: batch_idx should be less than batch_size. Using batch_idx = 0.")
             batch_idx = 0
         
-        final_body_pos_w = final_base_trans_w[batch_idx, :3, 3].numpy()
-        final_eef_pos_w = final_leg_trans_w[batch_idx, :, -1, :3, 3].numpy().T
+        final_body_pos_w = final_base_trans_w[batch_idx, :3, 3].cpu().numpy()
+        final_eef_pos_w = final_leg_trans_w[batch_idx, :, -1, :3, 3].cpu().numpy().T
         self.optimizer.logger.info(f"final body pos in world frame: {final_body_pos_w}")
         self.optimizer.logger.info(f"final eef pos in world frame: {final_eef_pos_w}")
         if self.opt_vis:
@@ -358,8 +358,8 @@ class Yuna:
             _, next_base_trans_w, next_leg_trans_w, _ = self.optimizer.get_transformations_from_params(next_params)
             end_time = time.time()
             self.optimizer.logger.info(f"Time taken to find waypoint {i}: {end_time - start_time} seconds")
-            next_body_pos_w = next_base_trans_w[batch_idx, :3, 3].numpy()
-            next_eef_pos_w = next_leg_trans_w[batch_idx, :, -1, :3, 3].numpy().T
+            next_body_pos_w = next_base_trans_w[batch_idx, :3, 3].cpu().numpy()
+            next_eef_pos_w = next_leg_trans_w[batch_idx, :, -1, :3, 3].cpu().numpy().T
             self.optimizer.logger.info(f"waypoint {i} body pos in world frame: {next_body_pos_w}")
             self.optimizer.logger.info(f"waypoint {i} eef pos in world frame: {next_eef_pos_w}")
             body_waypoints.append(next_body_pos_w)
