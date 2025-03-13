@@ -79,8 +79,8 @@ def svd_transform(A, B):
 class HexapodKinematics(object):
     def __init__(self):
 
-        short_legs = 0.1875
-        long_legs = 0.2375
+        short_legs = 0.2395 # 0.1875
+        long_legs = 0.2655 #  0.2375
 
         self.lfLeg = self.getLeg('left')
         self.rfLeg = self.getLeg('right')
