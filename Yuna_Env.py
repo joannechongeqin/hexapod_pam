@@ -7,6 +7,9 @@ import robot_setup
 from robot_setup.yunaKinematics import *
 from functions import hebi2bullet, bullet2hebi, solveIK, solveFK
 import matplotlib.pyplot as plt
+from zed_camera import ZedCamera
+
+np.set_printoptions(precision=4, suppress=True)
 
 h = 0.12
 eePos = np.array(  [[0.51589,    0.51589,   0.0575,     0.0575,     -0.45839,   -0.45839],
@@ -50,6 +53,8 @@ class Map:
         y_idx = int((x + self.map_range) / self.map_resolution)
         x_idx = int((y + self.map_range) / self.map_resolution)
         # print(f"getting height at ({x}, {y}) idx ({x_idx}, {y_idx}) = {self.height_map[x_idx, y_idx]}")
+        if not (0 <= x_idx < self.height_map.shape[0] and 0 <= y_idx < self.height_map.shape[1]):
+            print(f"Coordinates ({x}, {y}) are out of bounds for the height map.")
         return self.height_map[x_idx, y_idx] + self.eef_height_offset
     
     def get_heights_at(self, arr_of_xy):
@@ -103,7 +108,7 @@ class Map:
         print(f"Map data loaded from {file_path}.npz")
 
 class YunaEnv:
-    def __init__(self, real_robot_control=True, pybullet_on=True, visualiser=True, camerafollow=False, 
+    def __init__(self, real_robot_control=True, zed_on=False, pybullet_on=True, visualiser=True, camerafollow=False, 
                     eePos=eePos, goal=[], 
                     load_fyp_map=True, map_range=2.5, map_resolution=0.05):
         self.real_robot_control = real_robot_control
@@ -115,7 +120,7 @@ class YunaEnv:
         # self.all_reaction_forces = []
         # self.all_joint_torques = []
         self.complex_terrain = False
-        self.pybullet_on = pybullet_on # must be set to True if not will kill some functions below
+        self.pybullet_on = True # pybullet_on # must be set to True if not will kill some functions below
         
         self.eePos = eePos.copy() # eePos wrt robot frame
 
@@ -124,11 +129,14 @@ class YunaEnv:
         self.map_range = map_range
         self.map_resolution = map_resolution
 
+        self.zed_on = zed_on
+        if self.zed_on:
+            self.zed = ZedCamera()
         if self.pybullet_on:
             self._load_env()
         self._init_robot() # will have data of self.body_pos_w, self.body_orn_w
 
-    def step(self, targetPositions, iteration=1, sleep='auto'):
+    def step(self, targetPositions, iteration=1, initializing=False, sleep='auto'):
         '''
         Advance the simulation and physical robot by one step
         :param targetPositions: the target position of the robot, either in the form of workspace command (shape=(3,6)) or jointspace command (shape=(18,))
@@ -166,19 +174,21 @@ class YunaEnv:
                     controlMode=p.POSITION_CONTROL, 
                     targetPositions=jointspace_command2bullet,
                     # forces=self.forces
-                    forces = [60]*18
+                    # forces = [60]*18
                     )
                 p.stepSimulation()
-                self.body_pos_w, self.body_orn_w = p.getBasePositionAndOrientation(self.YunaID)
-                self.body_pos_w = np.array(self.body_pos_w)
+
+                if not initializing and self.zed_on and self.real_robot_control:
+                    print("self.body_pos_w, self.body_orn_w: ", self.body_pos_w, self.body_orn_w)
+                    print("frame_from_zed: ", self.zed.get_robot_frame_wrt_world())
+                    self.body_pos_w, self.body_orn_w = self.zed.get_robot_frame_wrt_world()
+                    p.resetBasePositionAndOrientation(self.YunaID, self.body_pos_w, self.body_orn_w)
+                else:
+                    self.body_pos_w, self.body_orn_w = p.getBasePositionAndOrientation(self.YunaID)
+
                 self.body_orn_w = np.array(self.body_orn_w)
                 self.eePos = self.get_leg_pos()
-                # reaction_forces = self.get_robot_joint_reaction_forces() # 18 (joints) x 6 (Fx Fy Fz Mx My Mz)
-                # torques_applied = self.get_robot_joint_motor_torques_applied()
-                # self.all_reaction_forces.append(reaction_forces)
-                # self.all_joint_torques.append(torques_applied)
-                # print("Reaction forces: \n", reaction_forces)
-                # print("Torques: \n", torques_applied)
+
                 if self.camerafollow:
                     self._cam_follow()
             t_stop = time.perf_counter()
@@ -200,6 +210,10 @@ class YunaEnv:
                 self.group_command.velocity_limit_max = arr
                 self.group_command.velocity_limit_min = arr
                 self.hexapod.send_command(self.group_command)
+
+        if self.zed_on:
+            self.zed.close()
+
         if self.pybullet_on:
             try:
                 p.disconnect()
@@ -280,7 +294,7 @@ class YunaEnv:
             self.rec1 = self.load_rectangular_body([1., 0, 0], [0.3, .75, 0.2], step_color)
             self.rec2 = self.load_rectangular_body([1.3, 0, 0], [0.2, .75, 0.3], step_color)
             self.wall = self.load_rectangular_body([1.44, 0, 0], [0.025, .75, 1.5], wall_color)
-            self.button = self.load_rectangular_body([1.42, -0.3, 0.6], [0.01, .05, 0.05], button_color)
+            self.button = self.load_rectangular_body([1.42, -0.3, 0.65], [0.01, .05, 0.05], button_color)
             p.changeDynamics(self.rec1, -1, lateralFriction=self.friction)
             p.changeDynamics(self.rec2, -1, lateralFriction=self.friction)
             if len(self.goal) > 0:
@@ -320,7 +334,7 @@ class YunaEnv:
         '''
         # parameters
         init_pos = self.eePos.copy()
-        self.step(init_pos, iteration=65, sleep='auto')
+        self.step(init_pos, initializing=True, iteration=65, sleep='auto')
         self.body_pos_w, self.body_orn_w = p.getBasePositionAndOrientation(self.YunaID) # use pybullet to get initial body position and orientation in world frame
         self.body_pos_w = np.array(self.body_pos_w)
         self.body_orn_w = np.array(self.body_orn_w)
@@ -416,14 +430,6 @@ class YunaEnv:
             robot_config = bullet2hebi(np.array([p.getJointState(self.YunaID, i)[0] for i in self.actuator]))
 
         return robot_config
-    
-    # def get_robot_joint_reaction_forces(self):
-    #     if not self.real_robot_control:
-    #         return np.array([p.getJointState(self.YunaID, i)[2] for i in self.actuator])
-        
-    # def get_robot_joint_motor_torques_applied(self):
-    #     if not self.real_robot_control:
-    #         return np.array([p.getJointState(self.YunaID, i)[3] for i in self.actuator])
 
     def get_leg_pos(self):
         '''
@@ -457,10 +463,25 @@ class YunaEnv:
     
 if __name__=='__main__':
     # test code
-    yunaenv = YunaEnv(real_robot_control=0, load_fyp_map=True)
+    yunaenv = YunaEnv(real_robot_control=0, zed_on=True, load_fyp_map=True)
     
-    height_map = yunaenv.height_map
-    height_map.plot()
+    print("init_base_pos: ", yunaenv.body_pos_w) # (0, 0, 0.1426)
+    
+    try:
+        while True:
+            yunaenv.step(yunaenv.eePos, iteration=1, sleep='auto')
+
+    except KeyboardInterrupt:
+        print("Exiting...")
+
+    # height_map = yunaenv.height_map
+    # height_map.plot()
+
+    # x = 0
+    # for i in range(40):
+    #     x = round(x + 0.05, 5)
+    #     var_at_edge = height_map.get_variance_at(x, 0)
+    #     print(f"Variance at ({x}, 0): {var_at_edge}")
 
     # height_map.save_map("height_map")
 
@@ -471,15 +492,15 @@ if __name__=='__main__':
     #     print(f"Height at ({x}, {y}): {new_map_instance.get_height_at(x, y)}")
     # new_map_instance.plot()
 
-    print("init_base_pos: ", yunaenv.body_pos_w) # (0, 0, 0.1426)
-    print("init_base_matrix: ", yunaenv.get_body_matrix())
-    print("init_leg_pos_r: ", yunaenv.get_leg_pos())
-    # [[ 0.51637698  0.51636734  0.05752237  0.05750151 -0.45838417 -0.45850756]
-    #  [ 0.2316928  -0.23172229  0.51306432 -0.51305886  0.33115791 -0.33117548]
-    #  [-0.12009861 -0.12009305 -0.120094   -0.12008067 -0.11029625 -0.11044209]]
-    print("init_leg_pos_w: ", yunaenv.get_leg_pos_in_world_frame())
-    # [[ 0.5149191   0.5147523   0.05616759  0.05579873 -0.4598487  -0.46019582]
-    #  [ 0.23102842 -0.23238657  0.51255405 -0.51356891  0.33082626 -0.33150703]
-    #  [ 0.02536965  0.02562286  0.02256538  0.02312707  0.02947116  0.02967863]]
-    time.sleep(10)
+    # print("init_base_pos: ", yunaenv.body_pos_w) # (0, 0, 0.1426)
+    # print("init_base_matrix: ", yunaenv.get_body_matrix())
+    # print("init_leg_pos_r: ", yunaenv.get_leg_pos())
+    # # [[ 0.51637698  0.51636734  0.05752237  0.05750151 -0.45838417 -0.45850756]
+    # #  [ 0.2316928  -0.23172229  0.51306432 -0.51305886  0.33115791 -0.33117548]
+    # #  [-0.12009861 -0.12009305 -0.120094   -0.12008067 -0.11029625 -0.11044209]]
+    # print("init_leg_pos_w: ", yunaenv.get_leg_pos_in_world_frame())
+    # # [[ 0.5149191   0.5147523   0.05616759  0.05579873 -0.4598487  -0.46019582]
+    # #  [ 0.23102842 -0.23238657  0.51255405 -0.51356891  0.33082626 -0.33150703]
+    # #  [ 0.02536965  0.02562286  0.02256538  0.02312707  0.02947116  0.02967863]]
+
     yunaenv.close()

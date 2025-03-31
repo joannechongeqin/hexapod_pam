@@ -21,11 +21,12 @@ eePos0_opt = np.array( [[ 0.4901,  0.4900,  0.0426,  0.0424, -0.4475, -0.4476],
                         [-0.1252, -0.1252, -0.1252, -0.1252, -0.1252, -0.1252] ])
 
 class Yuna:
-    def __init__(self, visualiser=True, camerafollow=True, real_robot_control=False, pybullet_on=True, show_ref_points=False, 
-                    eePos=eePos0_opt, goal=[], load_fyp_map=False,
+    def __init__(self, visualiser=True, camerafollow=True, real_robot_control=False, pybullet_on=True, zed_on=False,
+                    show_ref_points=False, 
+                    eePos=eePos0_opt, goal=[], load_fyp_map=True,
                     batch_size=1, opt_vis=False, body_interval=0.15):
         # initialise the environment
-        self.env = YunaEnv(visualiser=visualiser, camerafollow=camerafollow, real_robot_control=real_robot_control, pybullet_on=pybullet_on, 
+        self.env = YunaEnv(visualiser=visualiser, camerafollow=camerafollow, real_robot_control=real_robot_control, pybullet_on=pybullet_on, zed_on=zed_on,
                                 eePos=eePos, goal=goal, load_fyp_map=load_fyp_map)
         self.bodyPos = self.env.body_pos_w.copy()   # initial robot body position w.r.t world frame
         self.bodyOrn = self.env.body_orn_w.copy()   # initial robot body orientation w.r.t world frame
@@ -321,13 +322,13 @@ class Yuna:
             self.optimizer.visualize(base_trans=final_base_trans_w, leg_trans=final_leg_trans_w, goal=pos)
         
         # Planner
-            # To find the final optimized pose, we cannot fix the base_xy:
-            #       to allow the optimizer to try different xy body poses in the world frame,
-            #       for it to find a final body pose that can reach the goal.
-            # Once the final optimized pose is determined, a planner will plan the path
-            #       for the hexapod's body based on the initial and final optimized poses.
-            # After the path is planned, for each waypoint, make base_xy coincide
-            #       with that waypoint origin_xy when calculating the remaining leg poses.
+        # To find the final optimized pose, we cannot fix the base_xy:
+        #       to allow the optimizer to try different xy body poses in the world frame,
+        #       for it to find a final body pose that can reach the goal.
+        # Once the final optimized pose is determined, a planner will plan the path
+        #       for the hexapod's body based on the initial and final optimized poses.
+        # After the path is planned, for each waypoint, make base_xy coincide
+        #       with that waypoint origin_xy when calculating the remaining leg poses.
         
         # check distance between intial and final optimized body pose
         dist = np.linalg.norm(final_body_pos_w - initial_body_pos)
@@ -338,8 +339,7 @@ class Yuna:
         self.optimizer.logger.debug(f"Number of waypoints: {num_of_waypoints}")
 
         if num_of_waypoints <= 1:
-            self.move_to_next_pose(final_body_pos_w, final_eef_pos_w)
-            return
+            return [final_body_pos_w], [final_eef_pos_w]
 
         body_waypoints = []
         legs_waypoints = []
@@ -354,7 +354,7 @@ class Yuna:
             
             self.optimizer.logger.info(f"\n--- Solving for waypoint {i} ---")
             start_time = time.time()
-            next_params = self.optimizer.solve_multiple_legs_ik(pos=temp_pos, rot=temp_rot, leg_idxs=leg_idxs, has_base_goal=True, target_base_xy=torch.tensor(body_waypoint[:2]), plot_filename=f"waypoint_{i}.png")
+            next_params = self.optimizer.solve_multiple_legs_ik(pos=temp_pos, rot=temp_rot, leg_idxs=leg_idxs, has_base_goal=True, target_base_xy=body_waypoint[:2], plot_filename=f"waypoint_{i}.png")
             _, next_base_trans_w, next_leg_trans_w, _ = self.optimizer.get_transformations_from_params(next_params)
             end_time = time.time()
             self.optimizer.logger.info(f"Time taken to find waypoint {i}: {end_time - start_time} seconds")
