@@ -211,7 +211,8 @@ class Yuna:
                 self.env.add_body_frame_ref_point()
             counter += 1
         # print("num of traj points: ", counter)
-        self.eePos = target_pos_arr[-1].copy()
+
+        self.eePos = self.env.get_leg_pos() # target_pos_arr[-1].copy()
 
     def move_legs_to_pos_in_world_frame(self, target_pos_arr):
         '''
