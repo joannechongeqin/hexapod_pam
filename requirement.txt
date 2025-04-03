@@ -1,0 +1,19 @@
+# This file may be used to create an environment using:
+# $ conda create --name <env> --file <this file>
+# platform: linux-64
+
+# Once installed and activated, please run: 
+
+python=3.10.12
+
+download zed sdk https://www.stereolabs.com/en-sg/developers/release
+
+python -m pip install opencv-python pyopengl requests
+
+cd /usr/local/zed
+python get_python_api.py 
+
+if ImportError: version `GLIBCXX_3.4.30' not found (required by /usr/local/zed/lib/libsl_zed.so)
+conda install -c conda-forge libstdcxx-ng
+
+pip install hebi-py pytorch-kinematics pytorch-minimize pybullet trimesh
