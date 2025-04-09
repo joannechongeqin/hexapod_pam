@@ -40,7 +40,7 @@ class ZedCamera:
     def get_robot_frame_wrt_world(self):
         # W_T_R (robot_wrt_world) = W_T_C (camera_wrt_world) * C_T_C (camera_wrt_camera) * C_T_R (robot_wrt_camera)
         camera_left_eye_to_camera_center = 0.06 # 0.06m
-        cam_to_robot_base_height = 0.12 # TODO: FIX THIS
+        cam_to_robot_base_height = 0.2 # doesnt matter cuz it's gonna cancel out anyways
         robot_base_to_ground_height = 0.145
 
         camera_pose = sl.Pose() # C_T_C
@@ -59,7 +59,7 @@ class ZedCamera:
             robot_wrt_camera[2, 3] = - cam_to_robot_base_height 
 
             robot_wrt_world = camera_wrt_world * camera_pose.pose_data(sl.Transform()) * robot_wrt_camera
-            print("robot_wrt_world:\n", robot_wrt_world)
+            # print("robot_wrt_world:\n", robot_wrt_world)
 
             result_transform = sl.Transform()
             result_transform.init_matrix(robot_wrt_world)
@@ -70,8 +70,8 @@ class ZedCamera:
             result_orn = np.array(result_pose.get_orientation(result_orn).get())
             result_pos = sl.Translation()
             result_pos = np.array(result_pose.get_translation(result_pos).get())
-            print("result_orn:\n", result_orn)
-            print("result_pos:\n", result_pos)
+            # print("result_orn:\n", result_orn)
+            # print("result_pos:\n", result_pos)
 
             return result_pos, result_orn
 

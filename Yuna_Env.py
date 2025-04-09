@@ -78,7 +78,31 @@ class Map:
         return np.max(heights_below_body_area)
     
     # TODO: get variance --> such that free legs xy dont optimize so close to edges
+    # def get_variance_at(self, center_x, center_y, window_size=5):
+    #     half_window = window_size // 2
+    #     x_min = center_x - half_window * self.map_resolution
+    #     x_max = center_x + half_window * self.map_resolution
+    #     y_min = center_y - half_window * self.map_resolution
+    #     y_max = center_y + half_window * self.map_resolution
 
+    #     # Clip points to be within the map range
+    #     x_points = np.clip(np.arange(x_min, x_max + self.map_resolution, self.map_resolution), 
+    #                        -self.map_range, self.map_range)
+    #     y_points = np.clip(np.arange(y_min, y_max + self.map_resolution, self.map_resolution), 
+    #                        -self.map_range, self.map_range)
+
+    #     # Generate all grid points in the window
+    #     grid_points = np.array([[x, y] for y in y_points for x in x_points])
+
+    #     # Retrieve heights and compute the variance
+    #     heights = self.get_heights_at(grid_points)
+    #     # print("heights: ", heights)
+    #     return np.round(np.var(heights), 5)
+    
+    # def  get_variances_at(self, arr_of_xy, window_size=5):
+    #     print(f"finding variances at {arr_of_xy}")
+    #     return np.array([self.get_variance_at(x, y, window_size) for x, y in arr_of_xy])
+    
     def plot(self):
         plt.figure(figsize=(10, 7))
         plt.imshow(self.height_map, extent=(-self.map_range, self.map_range, -self.map_range, self.map_range), origin='lower', cmap='viridis')
@@ -122,19 +146,21 @@ class YunaEnv:
         self.complex_terrain = False
         self.pybullet_on = True # pybullet_on # must be set to True if not will kill some functions below
         
-        self.eePos = eePos.copy() # eePos wrt robot frame
+        self.eePos = eePos.copy() # initial eePos wrt robot frame
 
         self.load_fyp_map = load_fyp_map
         self.goal = goal
         self.map_range = map_range
         self.map_resolution = map_resolution
 
-        self.zed_on = zed_on
-        if self.zed_on:
-            self.zed = ZedCamera()
         if self.pybullet_on:
             self._load_env()
         self._init_robot() # will have data of self.body_pos_w, self.body_orn_w
+        
+        self.zed_on = zed_on
+        if self.zed_on:
+            time.sleep(2)
+            self.zed = ZedCamera()
 
     def step(self, targetPositions, iteration=1, initializing=False, sleep='auto'):
         '''
@@ -179,15 +205,14 @@ class YunaEnv:
                 p.stepSimulation()
 
                 if not initializing and self.zed_on and self.real_robot_control:
-                    print("self.body_pos_w, self.body_orn_w: ", self.body_pos_w, self.body_orn_w)
-                    print("frame_from_zed: ", self.zed.get_robot_frame_wrt_world())
+                    # print("self.body_pos_w, self.body_orn_w: ", self.body_pos_w, self.body_orn_w)
+                    # print("frame_from_zed: ", self.zed.get_robot_frame_wrt_world())
                     self.body_pos_w, self.body_orn_w = self.zed.get_robot_frame_wrt_world()
                     p.resetBasePositionAndOrientation(self.YunaID, self.body_pos_w, self.body_orn_w)
                 else:
                     self.body_pos_w, self.body_orn_w = p.getBasePositionAndOrientation(self.YunaID)
 
                 self.body_orn_w = np.array(self.body_orn_w)
-                self.eePos = self.get_leg_pos()
 
                 if self.camerafollow:
                     self._cam_follow()
@@ -286,6 +311,13 @@ class YunaEnv:
 
         p.setGravity(0, 0, self.gravity)
         p.changeDynamics(self.groundID, -1, lateralFriction=self.friction)
+
+        origin = [0, 0, 0]
+        axis_length = 0.15
+        lineWidth = 8
+        p.addUserDebugLine(origin, [axis_length, 0, 0], [1, 0, 0], lineWidth=lineWidth)  # X-axis (Red)
+        p.addUserDebugLine(origin, [0, axis_length, 0], [0, 1, 0], lineWidth=lineWidth)  # Y-axis (Green)
+        p.addUserDebugLine(origin, [0, 0, axis_length], [0, 0, 1], lineWidth=lineWidth)  # Z-axis (Blue)
     
         if self.load_fyp_map:
             step_color = [0.4, 0.58, 0.93, 1]
@@ -463,13 +495,14 @@ class YunaEnv:
     
 if __name__=='__main__':
     # test code
-    yunaenv = YunaEnv(real_robot_control=0, zed_on=True, load_fyp_map=True)
-    
+    # yunaenv = YunaEnv(real_robot_control=1, zed_on=True)
+    yunaenv = YunaEnv(real_robot_control=0, zed_on=False)  
     print("init_base_pos: ", yunaenv.body_pos_w) # (0, 0, 0.1426)
     
     try:
         while True:
             yunaenv.step(yunaenv.eePos, iteration=1, sleep='auto')
+            print("base_pos: ", yunaenv.body_pos_w)
 
     except KeyboardInterrupt:
         print("Exiting...")

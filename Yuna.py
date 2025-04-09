@@ -30,6 +30,7 @@ class Yuna:
                                 eePos=eePos, goal=goal, load_fyp_map=load_fyp_map)
         self.bodyPos = self.env.body_pos_w.copy()   # initial robot body position w.r.t world frame
         self.bodyOrn = self.env.body_orn_w.copy()   # initial robot body orientation w.r.t world frame
+        self.eePos_init = self.env.eePos.copy()
         self.eePos = self.env.eePos.copy()          # initial robot leg end-effector position w.r.t body frame
         
         self.eeAng = np.array([0., 0., 0., 0., 0., 0.,]) # the deviation of each leg from neutral position, use 0. to initiate a float type array
@@ -171,23 +172,7 @@ class Yuna:
     def bodyPos_w(self):
         # return self.bodyPos # calculated
         return np.array(self.env.body_pos_w) # based on pybullet
-    
-    # def swing_leg(self, leg_index, target_pos):
-    #     '''
-    #     :param leg_index: The index of the leg to move
-    #     :param target_pos: The target position of the leg in the world frame
-    #     '''
-    #     pos_w0 = self.eePos_w().copy()  # initial leg position in world frame
-    #     target_leg_midpoint = (pos_w0[:, leg_index] + target_pos) / 2  # use xy midpoint
-    #     target_leg_midpoint[2] = max(pos_w0[2, leg_index], target_pos[2]) + STEP_HEIGHT  # raise
-    #     pos_w1 = pos_w0.copy()
-    #     pos_w1[:, leg_index] = target_leg_midpoint
-    #     pos_w2 = pos_w0.copy()
-    #     pos_w2[:, leg_index] = target_pos
 
-    #     waypoints = [pos_w1, pos_w2]
-    #     # print("waypoints: ", waypoints)
-    #     self.move_legs_to_pos_in_world_frame(waypoints)
 
     def move_legs_to_pos_in_body_frame(self, target_pos_arr):
         '''
@@ -197,9 +182,11 @@ class Yuna:
         waypoints = [pos_b0] + target_pos_arr
         # print("waypoints: ", waypoints)
 
-        # plan and execute trajectory
-        # traj = self.trajplanner.general_traj(waypoints, total_time=len(waypoints) * 0.8)
-        traj = self.trajplanner.pam_traj(waypoints, total_time=len(waypoints) * 0.2)
+        # plan and execute trajectory        
+        if len(waypoints) == 2:
+            traj = self.trajplanner.pam_traj(waypoints, total_time=0.2)
+        else:
+            traj = self.trajplanner.pam_traj(waypoints, total_time=len(waypoints) * 0.2)
 
         counter = 0
         for traj_point in traj:
@@ -254,50 +241,6 @@ class Yuna:
         trans_by = target_body_pos - body_pos_w0
         self.trans_body_by_in_world_frame(trans_by)
 
-    # def rotx_body(self, angle, num_of_waypoints=2, move=False):
-    #     '''
-    #     angle: rotation angle in degrees
-    #     return: final leg pos wrt body frame to achieve the body rotation
-    #     '''
-    #     WTB0 = self.get_body_matrix() # initial body frame wrt world
-    #     pos_b0 = self.eePos_b() # self.env.get_leg_pos().copy() # initial leg pos in body frame
-    #     pos_w0 = self.eePos_w() # np.dot(WTB0, np.vstack((pos_b0, np.ones((1, 6)))))[0:3, :] # initial leg pos in world frame
-    #     # print("initial leg pos wrt body frame: \n", pos_b0)
-    #     # print("initial body frame wrt world: \n", WTB0)
-    #     # print("initial leg pos wrt world frame: \n", pos_w0)
-        
-    #     target_pos_arr = []
-    #     interval = angle / num_of_waypoints
-    #     for i in range(1, num_of_waypoints+1):
-    #         angle = np.deg2rad(interval*i)
-    #         c, s = np.cos(angle), np.sin(angle)
-    #         rot_x = np.array([[1, 0, 0, 0], [0, c, -s, 0], [0, s, c, 0], [0, 0, 0, 1]])
-    #         WTB1 = np.dot(WTB0, rot_x) # final body frame wrt world after rotation
-    #         # initial and final pos in world frame should be the same --> find final pos in body frame
-    #         pos_b1 = np.dot(np.linalg.inv(WTB1), np.vstack((pos_w0, np.ones((1, 6)))))[0:3, :] # final leg pos in body frame
-    #         # print("final body frame wrt world: \n", WTB1)
-    #         # print("final leg pos wrt body frame: \n", pos_b1)
-    #         # print("final leg pos wrt world frame: \n", np.dot(WTB1, np.vstack((pos_b1, np.ones((1, 6)))))[0:3, :])
-    #         target_pos_arr.append(pos_b1.copy())
-        
-        # # debug check (compare with actual)
-        # final_actual_pos = self.env.get_leg_pos().copy()
-        # final_actual_WTB = self.env.get_body_matrix()
-        # print("final actual leg pos wrt body frame: \n", final_actual_pos)
-        # print("final actual body frame wrt world: \n", final_actual_WTB)
-        # print("final actual leg pos wrt world frame: \n", np.dot(final_actual_WTB, np.vstack((final_actual_pos, np.ones((1, 6)))))[0:3, :])
-        
-        # if move:
-        #     self.move_legs_to_pos_in_body_frame(target_pos_arr)
-        # return pos_b1
-
-    # def rotx_trans_body(self, angle, dx, dy, dz, move=False):
-    #     pos_b0 = self.env.get_leg_pos().copy() # initial leg pos in body frame
-    #     pos_b1 = self.rotx_body(angle) # target pos after rotation in body frame
-    #     move_by_pos_arr = (pos_b1 - pos_b0) + self.trans_body(dx, dy, dz, move=False)
-    #     if move:
-    #         self.move_legs_by_pos_in_body_frame([move_by_pos_arr])
-    #     return move_by_pos_arr
 
     def pam(self, pos, leg_idxs, batch_idx=0):
         initial_body_pos = self.bodyPos_w().copy() # initial body pos in world frame
@@ -384,10 +327,11 @@ class Yuna:
         for i in range(num_of_waypoints-1):
             self.move_to_next_pose_tripod_gait(body_waypoints[i], legs_waypoints[i])
 
+        # last waypoint
         if motion[0] == "normal_walk":
             self.move_to_next_pose_tripod_gait(body_waypoints[-1], legs_waypoints[-1])
 
-        if motion[0] == "press_button":
+        elif motion[0] == "press_button":
             self._pam_press_button_motion(body_waypoints[-1], legs_waypoints[-1], motion[1])
 
     def pam_press_button(self, button_pos, leg_idx):
@@ -424,7 +368,8 @@ class Yuna:
 
         body_keyframe_w, leg_keyframe_w = self.trajplanner.pam_tripod_keyframe(initial_body_pos_w, next_body_pos_w, self.eePos_w(), next_eef_pos_w)
         leg_keyframe_b = self.keyframe_b_from_w(body_keyframe_w, leg_keyframe_w)
-        self.move_legs_to_pos_in_body_frame(leg_keyframe_b)
+        for keyframe in leg_keyframe_b:
+            self.move_legs_to_pos_in_body_frame([keyframe])
 
     def move_to_next_pose_wave_gait(self, next_body_pos_w, next_eef_pos_w, leg_sequence=[0, 1, 2, 3, 4, 5]):
         # MAINLY USED TO MOVE TO FINAL POSE (LAST STEP)

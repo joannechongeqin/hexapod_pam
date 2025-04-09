@@ -82,53 +82,6 @@ class TrajPlanner:
         
         end_pose = np.vstack((end_pos, end_ang))
         return end_pose
-    
-    # def get_quadruped_traj(self, init_pose, step_len, course, rotation, flag, timestep):
-    #     traj = np.zeros((3, 6))
-
-    #     curve_type = ['stance'] * 6
-    #     if flag == 0 or flag % 3 == 0:
-    #         for leg_index in self.quad1:
-    #             curve_type[leg_index] = 'swing'
-    #     elif (flag - 1) % 3 == 0:
-    #         for leg_index in self.quad2:
-    #             curve_type[leg_index] = 'swing'
-    #     else: 
-    #         for leg_index in self.quad3:
-    #             curve_type[leg_index] = 'swing'
-        
-    #     end_pose = self._get_quadruped_end_pose(step_len, course, rotation, flag)
-    #     for leg_index in range(6):
-    #         traj[:, leg_index] = self._compute_traj(init_pose[:, leg_index], end_pose[:, leg_index], curve_type[leg_index], leg_index, timestep)
-    #     return traj, end_pose
-
-    # # NOTE: there is a weird drift in second step and last step, and actual distance / angle reached is wrong compared to the desired distance / angle
-    # #       ^ not sure if i interpreted "pose" wrongly, or is just my math problem :(
-    # def _get_quadruped_end_pose(self, step_len, course, rotation, flag=0):
-    #     end_pos = np.zeros((3, 6))
-    #     end_ang = np.zeros((6,))
-    #     neutral_pose = np.zeros((4,1))
-        
-    #     def update_legs(legs, step_sign, rot_sign):
-    #         for leg_index in legs:
-    #             end_pos[:, leg_index] = np.reshape(transxy(neutral_pose[:3], step_sign * step_len / 3, course), (3,))
-    #             end_ang[leg_index] = neutral_pose[3] + rot_sign * rotation / 3
-
-    #     if flag == 0 or flag % 3 == 0:
-    #         update_legs(self.quad1, +1, +1)
-    #         update_legs(self.quad2, -1, -1)
-    #         if flag == 0:
-    #             update_legs(self.quad3, -1, -1)
-    #     elif (flag - 1) % 3 == 0:
-    #         update_legs(self.quad2, +1, +1)
-    #         update_legs(self.quad3, -1, -1)
-    #     else:
-    #         update_legs(self.quad3, +1, +1)
-    #         update_legs(self.quad1, -1, -1)
-
-    #     end_pose = np.vstack((end_pos, end_ang))
-    #     return end_pose
-
 
     def pose2pos(self, pose, leg_index): 
         '''
@@ -248,17 +201,27 @@ class TrajPlanner:
 
     def pam_press_button_keyframe(self, body_w_init, body_w_final, leg_w_init, leg_w_final, press_leg_idx, raise_height=0.1):
         # assuming can only press with front two legs (index 0 or 1)
-        # quadrangular gait:
+        
+        # old version: quadrangular gait:
         #   1. move leg2 and leg5 (and trans half of body)
         #   2. move leg3 and leg4 (and trans half of body)
         #   3. move last support leg
         #   4. final leg to press
-        pair1 = [3, 4]
-        pair2 = [2, 5]
-        last_support_leg = 0 if press_leg_idx == 1 else 1
 
-        # for step 1 and 2: split into 4 keyframes where body moves 1/4 forward each time
-        quarter_body_trans = (body_w_final - body_w_init) / 4
+        # new version:
+        #   1. move first set of legs (trans 1/3 of body)
+        #   2. move second set of legs (trans 1/3 of body)
+        #   3. final leg to press (trans 1/3 of body)
+
+        if press_leg_idx == 1:
+            pair1 = [0, 3, 4]
+            pair2 = [2, 5]
+        elif press_leg_idx == 0:
+            pair1 = [1, 2, 5]
+            pair2 = [3, 4]
+
+        # for step 1 and 2: split into 4 keyframes where body moves 1/6 forward each time
+        quarter_body_trans = (body_w_final - body_w_init) / 6
         body_keyframe_w = [body_w_init]
         for i in range(4): 
             body_keyframe_w.append(body_keyframe_w[-1] + quarter_body_trans)
@@ -292,30 +255,29 @@ class TrajPlanner:
             set4[:, i] = leg_w_final[:, i]
         leg_keyframe_w.append(set4)
         
-
         # 5. raise last support leg
-        set5 = set4.copy()
-        set5[:, last_support_leg] = mid[:, last_support_leg]
-        set5[2, last_support_leg] = max(set4[2, last_support_leg], leg_w_final[2, last_support_leg]) + raise_height
-        leg_keyframe_w.append(set5)
-        body_keyframe_w.append(body_keyframe_w[-1])
+        # set5 = set4.copy()
+        # set5[:, last_support_leg] = mid[:, last_support_leg]
+        # set5[2, last_support_leg] = max(set4[2, last_support_leg], leg_w_final[2, last_support_leg]) + raise_height
+        # leg_keyframe_w.append(set5)
+        # body_keyframe_w.append(body_keyframe_w[-1])
 
-        # 6. lower last support leg
-        set6 = set5.copy()
-        set6[:, last_support_leg] = leg_w_final[:, last_support_leg]
-        leg_keyframe_w.append(set6)
-        body_keyframe_w.append(body_keyframe_w[-1]) 
+        # # 6. lower last support leg
+        # set6 = set5.copy()
+        # set6[:, last_support_leg] = leg_w_final[:, last_support_leg]
+        # leg_keyframe_w.append(set6)
+        # body_keyframe_w.append(body_keyframe_w[-1]) 
 
         # 7. slowly raise last leg to press
-        set7a = set6.copy()
-        set7a[2, press_leg_idx] = set6[2, press_leg_idx] + raise_height
+        set7a = set4.copy()
+        set7a[2, press_leg_idx] = set4[2, press_leg_idx] + raise_height
         leg_keyframe_w.append(set7a)
-        body_keyframe_w.append(body_keyframe_w[-1])
+        body_keyframe_w.append(body_keyframe_w[-1] + quarter_body_trans)
 
         set7b = set7a.copy()
         set7b[:, press_leg_idx] = (set7b[:, press_leg_idx] + leg_w_final[:, press_leg_idx]) / 2
         leg_keyframe_w.append(set7b)
-        body_keyframe_w.append(body_keyframe_w[-1])
+        body_keyframe_w.append(body_keyframe_w[-1] + quarter_body_trans)
 
         # 8. press with last leg
         set8 = set7b.copy()
@@ -327,8 +289,6 @@ class TrajPlanner:
         print("press_button leg_keyframe_w:\n", leg_keyframe_w)
         return body_keyframe_w, leg_keyframe_w 
     
-
-
     def pam_wave_keyframe(self, body_w_init, body_w_final, leg_w_init, leg_w_final, raise_height=0.1, support_legs = [True] * 6, leg_sequence = [0, 1, 2, 3, 4, 5]):
         num_support_legs = sum(support_legs)
         body_trans_interval = (body_w_final - body_w_init) / num_support_legs / 2
