@@ -1,6 +1,6 @@
-# README
+# Pose Assisted Manipulation (PAM) for a Hexapod Robot
 
-## Pose Assisted Manipulation (PAM) for a Hexapod Robot
+## Introduction 
 
 This project aims to enhance the capabilities of hexapod robots by enabling them to use their legs for both locomotion and manipulation. It involves **the development of a pose optimization algorithm and a motion planning pipeline** for a hexapod robot to perform manipulation tasks at elevated targets, beyond the reach of traditional ground-based configurations.
 
@@ -11,6 +11,17 @@ This project aims to enhance the capabilities of hexapod robots by enabling them
 Hexapod robots offer exceptional stability on uneven terrain, as they can maintain static stability with three or more legs, allowing them to navigate rough environments with ease. In addition, their redundant legs present opportunities for manipulation, to perform tasks and interact with their surroundings. However, the robot’s size and conventional configuration often limit its manipulation range. Simply walking closer to a target may not always be feasible due to obstacles, terrain conditions, or spatial constraints.
 
 This project was completed as my final year project at the National University of Singapore’s MARMot Lab. A special thanks to my supervisor and the PhD students of the Legged Team for their invaluable support, insightful discussions, and technical guidance throughout the project.
+
+
+## Environment Representation and Task Specification
+
+For this project, the environment is assumed to be static, rigid, and predetermined. The task involves navigating a terrain with two distinct steps and using leg 2 (the front-right leg) to reach and press a button located at a fixed goal position on the wall.
+
+
+## Demonstration Video
+
+https://github.com/user-attachments/assets/7211eab6-9b2f-42e7-93e6-b2eb6e9f2099
+
 
 ## Proposed Overall Pipeline
 
@@ -25,7 +36,7 @@ This project was completed as my final year project at the National University o
 
 ## Yuna Configuration
 
-This work is done with the [HEBI Robotics ``Daisy`` 18-DoF (degrees of freedom) hexapod robot](https://robotsguide.com/robots/daisy). 
+This work is done with the [HEBI Robotics `Daisy` 18-DoF (degrees of freedom) hexapod robot](https://robotsguide.com/robots/daisy). 
 
        ^^ Front ^^   
         1 ----- 2       +x  
@@ -33,12 +44,7 @@ This work is done with the [HEBI Robotics ``Daisy`` 18-DoF (degrees of freedom) 
         3 ----- 4       |  <-╮+yaw   
             |     +y <--o    
         5 ----- 6       +z     
-
-
-## Environment Representation and Task Specification
-
-For this project, the environment is assumed to be static, rigid, and predetermined. The task involves navigating a terrain with two distinct steps and using leg 2 (the front-right leg) to reach and press a button located at a fixed goal position on the wall.
-
+        
 
 ## Code Structure
 | File | Description |
@@ -50,5 +56,3 @@ For this project, the environment is assumed to be static, rigid, and predetermi
 | [`YunaEnv.py`](YunaEnv.py) | Sets up the simulation environment. |
 | [`zed_camera.py`](zed_camera.py) | Integrates the ZED 2i stereo camera for positional tracking as odometry feedback in real world testing. |
 | [`pam_demo.py`](pam_demo.py) | Demonstrates how to specify target positions for the legs and use PAM functions. |
-
-<!-- ## Real World Testing and Results -->
