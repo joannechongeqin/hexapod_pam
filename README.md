@@ -22,7 +22,6 @@ For this project, the environment is assumed to be static, rigid, and predetermi
 
 https://github.com/user-attachments/assets/7211eab6-9b2f-42e7-93e6-b2eb6e9f2099
 
-
 ## Proposed Overall Pipeline
 
 1. **Optimization for the final stable pose** of the robot to ensure that its end effectors can accurately reach the target positions required for the manipulation task.
@@ -44,7 +43,10 @@ This work is done with the [HEBI Robotics `Daisy` 18-DoF (degrees of freedom) he
         3 ----- 4       |  <-╮+yaw   
             |     +y <--o    
         5 ----- 6       +z     
-        
+
+## Useful Links
+- [Installation guide](installation.md)
+- [Presentation slide](https://www.canva.com/design/DAGkl9goSS8/2-nqCnSjbdzQDmBQzpp0Lg/view)
 
 ## Code Structure
 | File | Description |
